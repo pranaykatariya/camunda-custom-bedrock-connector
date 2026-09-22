@@ -54,6 +54,37 @@ layout.
 `deploy/kubernetes/deployment.yaml` (ConfigMap and Deployment) and `secret.example.yaml`
 (the shape of the Secret) are a starting point:
 
+```mermaid
+flowchart LR
+    cm["ConfigMap<br/>CAMUNDA_CLIENT_MODE · cluster id · region<br/>job types · ORG_AI_GATEWAY_URL<br/>ORG_AI_GATEWAY_HOST_HEADER · auth mode"]
+    secret["Secret<br/>CAMUNDA_CLIENT_AUTH_CLIENTID / SECRET<br/>ORG_AI_CLIENT_ID / SECRET"]
+
+    subgraph deployment["Deployment · replicas: 2"]
+        direction TB
+        pod1["Pod 1<br/>uid 1001 · read-only rootfs<br/>all capabilities dropped<br/>own token cache"]
+        pod2["Pod 2<br/>uid 1001 · read-only rootfs<br/>all capabilities dropped<br/>own token cache"]
+    end
+
+    probes["kubelet probes<br/>/actuator/health/readiness<br/>/actuator/health/liveness"]
+
+    cm -- "envFrom" --> deployment
+    secret -- "envFrom" --> deployment
+    probes -.-> pod1
+    probes -.-> pod2
+
+    classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
+    classDef ext fill:#E6F6EC,stroke:#2E9E5B,stroke-width:1.5px,color:#0F4D2A
+    classDef cfg fill:#F1EDFF,stroke:#7B61FF,stroke-width:1.5px,color:#2E1F7A
+    classDef bad fill:#FDECEC,stroke:#D64545,stroke-width:1.5px,color:#7A1414
+    class pod1,pod2 ours
+    class cm cfg
+    class secret bad
+    class probes ext
+    style deployment fill:transparent,stroke:#F08A24,stroke-width:2px,stroke-dasharray:6 4
+```
+
+The Secret is drawn red because it holds the only sensitive values; nothing else in the picture does.
+
 * Non-secret settings go in the ConfigMap. Credentials go in a Secret, injected with `envFrom`.
 * Use a non-root user, a read-only root filesystem, and drop all capabilities.
 * Readiness/liveness use `/actuator/health/*`. Readiness includes the Camunda client connection.
@@ -61,6 +92,45 @@ layout.
   per token lifetime.
 
 ## Hybrid mode (Camunda SaaS + this runtime)
+
+```mermaid
+flowchart LR
+    subgraph saas["Camunda SaaS"]
+        direction TB
+        zeebe[("Zeebe cluster")]
+        saasRt["SaaS connector runtime<br/>serves the standard<br/>io.camunda.* job types"]
+    end
+
+    subgraph net["Your network"]
+        direction TB
+        rt["This runtime<br/>serves the custom<br/>org.ai-gateway:* job types"]
+        store["Kubernetes Secret /<br/>secret manager"]
+        gw["Organization<br/>Bedrock gateway"]
+        idp["Token endpoint<br/>OAuth2 mode only"]
+    end
+
+    bedrock[("AWS Bedrock")]
+
+    rt -- "activates and completes jobs<br/>outbound gRPC / REST only" --> zeebe
+    saasRt <--> zeebe
+    store -. "env vars" .-> rt
+    rt -- "HTTPS · x-bam-token" --> gw --> bedrock
+    rt -. "client credentials" .-> idp
+
+    classDef cam fill:#E8F0FE,stroke:#4A7BD0,stroke-width:1.5px,color:#1A3A6B
+    classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
+    classDef ext fill:#E6F6EC,stroke:#2E9E5B,stroke-width:1.5px,color:#0F4D2A
+    classDef bad fill:#FDECEC,stroke:#D64545,stroke-width:1.5px,color:#7A1414
+    class zeebe,saasRt cam
+    class rt ours
+    class gw,idp,bedrock ext
+    class store bad
+    style saas fill:transparent,stroke:#4A7BD0,stroke-width:2px
+    style net fill:transparent,stroke:#F08A24,stroke-width:2px,stroke-dasharray:6 4
+```
+
+Both runtimes talk to the same cluster, but they never compete for a job because they serve
+different job types. The gateway credentials stay inside your network.
 
 1. Create an API client in the SaaS console (scope *Zeebe*, plus *Secrets* if you use
    `{{secrets.*}}` in BPMN). Set `CAMUNDA_CLIENT_MODE=saas` and the cluster id, region and client
@@ -79,6 +149,28 @@ layout.
 ## BPMN / Modeler
 
 The only change a BPMN element needs is its **task definition type**. Pick one option.
+
+```mermaid
+flowchart LR
+    official["Camunda official 8.9.12 templates<br/>AI Agent Task / Sub-process"]
+    gen["scripts/generate-element-templates.py<br/>optional --gateway-url"]
+    orgT["element-templates/*.json<br/>… (Organization Bedrock Gateway)"]
+    hybrid["Camunda Hybrid AI Agent<br/>Task / Sub-process templates"]
+    manual["Set by hand: task type,<br/>AWS Bedrock, Default Credentials Chain,<br/>custom endpoint"]
+    modeler["Web / Desktop Modeler<br/>set region · gateway endpoint · model"]
+    deploy(["Deploy BPMN<br/>jobs go to this runtime"])
+
+    official --> gen --> orgT -- "Option 1 (recommended)" --> modeler
+    hybrid -- "Option 2" --> manual --> modeler
+    modeler --> deploy
+
+    classDef cam fill:#E8F0FE,stroke:#4A7BD0,stroke-width:1.5px,color:#1A3A6B
+    classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
+    classDef ext fill:#E6F6EC,stroke:#2E9E5B,stroke-width:1.5px,color:#0F4D2A
+    class official,hybrid,modeler cam
+    class gen,orgT,manual ours
+    class deploy ext
+```
 
 ### Option 1 (recommended): organization templates
 

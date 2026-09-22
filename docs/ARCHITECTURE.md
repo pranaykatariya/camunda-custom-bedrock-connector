@@ -5,6 +5,58 @@ This analysis is based on the **decompiled bytecode** of
 AWS SDK v2 2.50.2, the versions `pom.xml` resolves. Every class and method named below exists in
 those artifacts.
 
+## At a glance
+
+```mermaid
+flowchart LR
+    zeebe[("Zeebe<br/>Camunda cluster")]
+
+    subgraph runtime["This runtime"]
+        direction TB
+        agent["AI Agent Task / Sub-process<br/>tools · memory · prompts"]
+        router{"OrganizationGateway<br/>ChatModelFactory"}
+        std["ChatModelFactoryImpl<br/>Camunda default"]
+        builder["OrganizationBedrock<br/>ChatModelBuilder"]
+        transport["AuthenticatingSdkHttpClient<br/>adds org headers per attempt"]
+        auth["OrganizationAuthenticationProvider<br/>token cache"]
+
+        agent --> router
+        router -- "any other provider" --> std
+        router -- "Bedrock" --> builder --> transport
+        auth -- "GatewayCredentials" --> transport
+    end
+
+    subgraph outside["External"]
+        direction TB
+        llm[("Anthropic · OpenAI · Azure<br/>Vertex · OpenAI-compatible")]
+        gw["Organization<br/>Bedrock gateway"]
+        bedrock[("AWS Bedrock")]
+        idp["Token endpoint<br/>OAuth2 mode only"]
+        gw --> bedrock
+    end
+
+    zeebe -- "job<br/>org.ai-gateway:aiagent:1" --> agent
+    std -- "provider's own auth, unchanged" --> llm
+    transport -- "HTTPS · x-bam-token · Accept · Host<br/>no SigV4" --> gw
+    auth -. "client credentials" .-> idp
+
+    classDef cam fill:#E8F0FE,stroke:#4A7BD0,stroke-width:1.5px,color:#1A3A6B
+    classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
+    classDef ext fill:#E6F6EC,stroke:#2E9E5B,stroke-width:1.5px,color:#0F4D2A
+    class agent,std cam
+    class router,builder,transport,auth ours
+    class zeebe,gw,bedrock,llm,idp ext
+    style runtime fill:transparent,stroke:#F08A24,stroke-width:2px,stroke-dasharray:6 4
+    style outside fill:transparent,stroke:#2E9E5B,stroke-width:2px,stroke-dasharray:6 4
+```
+
+**Colours used in every diagram in these docs:**
+🟦 Camunda / LangChain4j / AWS SDK code, unchanged ·
+🟧 this project ·
+🟩 external systems ·
+🟥 fail-closed paths ·
+🟪 configuration.
+
 ## 1. Feasibility
 
 **Supported**, through a documented Camunda extension point: a `@ConditionalOnMissingBean` bean
@@ -35,6 +87,47 @@ re-checked on every upgrade (see [UPGRADING.md](UPGRADING.md)).
 
 ## 3. Execution path
 
+```mermaid
+flowchart TD
+    job(["Zeebe job<br/>org.ai-gateway:aiagent:1 · org.ai-gateway:aiagent-job-worker:1"])
+    handler["AiAgentFunction / AiAgentJobWorker → AgentRequestHandler<br/>tools · memory · prompts · limits"]
+    adapter["Langchain4JAiFrameworkAdapter<br/>executeChatRequest()"]
+    router{"OrganizationGatewayChatModelFactory<br/>provider.type?"}
+    std["ChatModelFactoryImpl<br/>identical to Camunda's default bean"]
+    builder["OrganizationBedrockChatModelBuilder<br/>create()"]
+    endpoint{"Endpoint set,<br/>https and allow-listed?"}
+    rejected["OrganizationAuthenticationException<br/>ENDPOINT_NOT_PERMITTED"]
+    client["BedrockRuntimeClient<br/>region · endpointOverride · apiCallTimeout<br/>AnonymousCredentialsProvider + noAuth-only scheme<br/>httpClientBuilder = AuthenticatingSdkHttpClientBuilder"]
+    model["BedrockChatModel<br/>modelId · timeout · inferenceConfig<br/>wrapped: OrganizationAuthenticatedChatModel<br/>→ CloseableChatModelDelegate"]
+    chat{"OrganizationAuthenticatedChatModel.chat()<br/>credentials available?"}
+    noCreds["Fail closed<br/>nothing is sent"]
+    converse["BedrockChatModel.chat → BedrockRuntimeClient.converse<br/>LangChain4j retry · AWS SDK retry"]
+    attempt["AuthenticatingSdkHttpClient.prepareRequest()<br/>per attempt: allow-list check · set x-bam-token, Accept, Host<br/>strip SigV4 headers · 401 → invalidate + retry once"]
+    apache["Apache HTTP client"]
+    gw["Organization Bedrock gateway"]
+    bedrock[("AWS Bedrock")]
+
+    job --> handler --> adapter --> router
+    router -- "not Bedrock" --> std
+    router -- "Bedrock" --> builder --> endpoint
+    endpoint -- "no" --> rejected
+    endpoint -- "yes" --> client --> model --> chat
+    chat -- "no" --> noCreds
+    chat -- "yes" --> converse --> attempt --> apache --> gw --> bedrock
+
+    classDef cam fill:#E8F0FE,stroke:#4A7BD0,stroke-width:1.5px,color:#1A3A6B
+    classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
+    classDef ext fill:#E6F6EC,stroke:#2E9E5B,stroke-width:1.5px,color:#0F4D2A
+    classDef bad fill:#FDECEC,stroke:#D64545,stroke-width:1.5px,color:#7A1414
+    class handler,adapter,std,converse,apache cam
+    class router,builder,endpoint,client,model,chat,attempt ours
+    class job,gw,bedrock ext
+    class rejected,noCreds bad
+```
+
+<details>
+<summary>Plain-text version</summary>
+
 ```
 Camunda job (org.ai-gateway:aiagent:1 or org.ai-gateway:aiagent-job-worker:1)
  → AiAgentFunction / AiAgentJobWorker → *AgentRequestHandler (tools, memory, prompts, limits)
@@ -56,7 +149,33 @@ Camunda job (org.ai-gateway:aiagent:1 or org.ai-gateway:aiagent-job-worker:1)
    → Apache HTTP client → Organization Bedrock gateway → Bedrock
 ```
 
+</details>
+
 ## 4. Extension point
+
+How the bean override happens at startup:
+
+```mermaid
+flowchart LR
+    enabled{"organization.ai-gateway.auth.enabled<br/>and framework = langchain4j?"}
+    stock["No bean from this project<br/>runtime = stock Camunda connector"]
+    ours["OrganizationAuthAutoConfiguration<br/>@AutoConfiguration(before = AgenticAiConnectorsAutoConfiguration)"]
+    beans["Registers<br/>GatewayEndpointMatcher<br/>OrganizationAuthenticationProvider<br/>ChatModelFactory = OrganizationGatewayChatModelFactory"]
+    camunda["AgenticAiConnectorsAutoConfiguration<br/>→ AgenticAiLangchain4JFrameworkConfiguration"]
+    backoff["langchain4JChatModelFactory<br/>@ConditionalOnMissingBean → backs off"]
+
+    enabled -- "false" --> stock
+    enabled -- "true" --> ours --> beans
+    ours -- "runs first, then" --> camunda --> backoff
+    beans -. "bean already present" .-> backoff
+
+    classDef cam fill:#E8F0FE,stroke:#4A7BD0,stroke-width:1.5px,color:#1A3A6B
+    classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
+    classDef cfg fill:#F1EDFF,stroke:#7B61FF,stroke-width:1.5px,color:#2E1F7A
+    class camunda,backoff,stock cam
+    class ours,beans ours
+    class enabled cfg
+```
 
 | What | Camunda type | Mechanism |
 |---|---|---|
@@ -65,7 +184,27 @@ Camunda job (org.ai-gateway:aiagent:1 or org.ai-gateway:aiagent-job-worker:1)
 | **Reproduced (private in Camunda)** | `createBedrockClient`, `deriveTimeoutSetting`, `applyBedrockModelParametersIfPresent`, `createAwsHttpClientBuilder`, `createAwsProxyConfiguration` | `CamundaBedrockClientParity`, using only public APIs (`AgenticAiHttpProxySupport#getProxyConfiguration`, `ProxyConfiguration#getProxyDetails`, `NonProxyHosts#getNonProxyHostRegexPatterns`) |
 | **AWS SDK public API** | `BedrockRuntimeClientBuilder#httpClientBuilder`, `#authSchemeProvider`, `#putAuthScheme`, `SdkHttpClient` | `AuthenticatingSdkHttpClient(Builder)` |
 
-Layering:
+Layering (arrows point from a package to the packages it depends on):
+
+```mermaid
+flowchart TB
+    config["<b>config</b> · Spring wiring<br/>OrganizationAuthAutoConfiguration<br/>OrganizationAuthProperties"]
+    camunda["<b>camunda</b> · the only package that touches Camunda types<br/>OrganizationGatewayChatModelFactory<br/>OrganizationBedrockChatModelBuilder<br/>OrganizationAuthenticatedChatModel<br/>CamundaBedrockClientParity"]
+    transport["<b>transport</b> · decorates an AWS SDK SdkHttpClient<br/>AuthenticatingSdkHttpClient<br/>AuthenticatingSdkHttpClientBuilder<br/>GatewayEndpointMatcher"]
+    auth["<b>auth</b> · produces GatewayCredentials<br/>no Camunda, LangChain4j or HTTP types<br/>OrganizationAuthenticationProvider<br/>CachingTokenAuthenticationProvider<br/>StaticHeadersAuthenticationProvider<br/>AccessTokenSource<br/>PlaceholderJwtTokenSource<br/>oauth2.ClientCredentialsTokenClient"]
+
+    config --> camunda
+    config --> transport
+    config --> auth
+    camunda --> transport
+    camunda --> auth
+    transport --> auth
+
+    classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
+    classDef cfg fill:#F1EDFF,stroke:#7B61FF,stroke-width:1.5px,color:#2E1F7A
+    class camunda,transport,auth ours
+    class config cfg
+```
 
 * `auth` knows nothing about Camunda, LangChain4j or HTTP. It only produces `GatewayCredentials`.
 * `transport` knows nothing about Camunda. It decorates an AWS SDK `SdkHttpClient`.
@@ -92,6 +231,60 @@ Layering:
    `ConnectorException(FAILED_MODEL_CALL, "Model call failed: …")`. Ours travel the same path.
 
 ## 6. What happens during one AI Agent request
+
+```mermaid
+sequenceDiagram
+    autonumber
+    box rgba(74,123,208,0.12) Camunda, unchanged
+        participant Z as Zeebe
+        participant A as AI Agent<br/>handler + adapter
+    end
+    box rgba(240,138,36,0.14) This project
+        participant F as OrganizationGateway<br/>ChatModelFactory
+        participant B as OrganizationBedrock<br/>ChatModelBuilder
+        participant M as OrganizationAuthenticated<br/>ChatModel
+        participant H as AuthenticatingSdk<br/>HttpClient
+        participant P as Authentication<br/>Provider
+    end
+    box rgba(46,158,91,0.12) Your network
+        participant G as Organization<br/>Bedrock gateway
+    end
+
+    Z->>A: activate job (custom job type)
+    Note over A: bind inputs, resolve tools,<br/>load memory, compose prompts
+    A->>F: createChatModel(providerConfiguration)
+    F->>B: create(bedrock)
+    B->>B: endpoint set, https, allow-listed?<br/>(otherwise fail closed)
+    B-->>A: CloseableChatModelDelegate
+    A->>M: chat(request)
+    M->>P: getCredentials()
+    alt cached token still valid
+        P-->>M: cached credentials (lock-free read)
+    else missing or expired
+        P->>P: single-flight refresh
+        P-->>M: fresh credentials
+    end
+    Note over M,H: LangChain4j builds the Converse request,<br/>the AWS SDK runs its attempt loop
+    M->>H: prepareRequest() for each SDK attempt
+    H->>H: request URI on the allow-list?
+    H->>P: getCredentials()
+    P-->>H: x-bam-token · Accept · Host
+    H->>G: POST .../model/MODEL_ID/converse (unsigned)
+    alt any status except 401
+        G-->>H: response
+    else 401 Unauthorized
+        G-->>H: 401
+        H->>P: invalidate(rejected credentials)
+        H->>P: getCredentials()
+        P-->>H: fresh credentials
+        H->>G: resend once, same body
+        G-->>H: response (a second 401 fails the job, sanitized)
+    end
+    H-->>M: response via AWS SDK and LangChain4j
+    M-->>A: ChatResponse
+    A->>Z: complete job
+    Note over A,B: Camunda closes the model, which closes<br/>the BedrockRuntimeClient and its HTTP client
+```
 
 1. Zeebe activates a job of this runtime's custom type. Camunda binds the element inputs,
    resolves tools, loads memory and composes the prompts. None of this is changed.

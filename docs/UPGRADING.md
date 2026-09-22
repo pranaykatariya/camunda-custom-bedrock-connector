@@ -4,7 +4,61 @@ The only version this project pins is `<version.connectors>` in `pom.xml`. Sprin
 the AWS SDK, Jackson and every other library come from Camunda's `connector-parent` BOM for that
 version.
 
+```mermaid
+flowchart LR
+    pom["pom.xml<br/>version.connectors = 8.9.12"]
+    bom["connector-parent BOM"]
+    agentic["connector-agentic-ai"]
+    starter["spring-boot-starter-<br/>camunda-connectors"]
+    boot["Spring Boot"]
+    lc4j["LangChain4j<br/>langchain4j-bedrock"]
+    aws["AWS SDK v2<br/>bedrockruntime · apache-client"]
+    jackson["Jackson · others"]
+
+    pom -- "imports" --> bom
+    pom -- "same version" --> agentic
+    pom -- "same version" --> starter
+    bom --> boot
+    bom --> lc4j
+    bom --> aws
+    bom --> jackson
+
+    classDef cam fill:#E8F0FE,stroke:#4A7BD0,stroke-width:1.5px,color:#1A3A6B
+    classDef cfg fill:#F1EDFF,stroke:#7B61FF,stroke-width:1.5px,color:#2E1F7A
+    class pom cfg
+    class bom,agentic,starter,boot,lc4j,aws,jackson cam
+```
+
+Colours: 🟦 Camunda / third-party, unchanged · 🟧 this project · 🟥 stop and fix · 🟪 configuration.
+
 ## Procedure
+
+```mermaid
+flowchart TD
+    bump["1 · Bump version.connectors in pom.xml<br/>align version.spring-boot (build plugin)"]
+    javap["2 · javap the new ChatModelFactoryImpl<br/>and ChatModelHttpProxySupport"]
+    diff{"Copied Bedrock setup<br/>changed upstream?"}
+    port["Port the change into<br/>CamundaBedrockClientParity"]
+    verify{"3 · ./mvnw verify<br/>green?"}
+    investigate["Read the failing tripwire test<br/>(table below) and adapt"]
+    regen["4 · Regenerate element templates<br/>review the diff"]
+    publish(["Republish templates<br/>and roll out the runtime"])
+
+    bump --> javap --> diff
+    diff -- "yes" --> port --> verify
+    diff -- "no" --> verify
+    verify -- "no" --> investigate --> verify
+    verify -- "yes" --> regen --> publish
+
+    classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
+    classDef ext fill:#E6F6EC,stroke:#2E9E5B,stroke-width:1.5px,color:#0F4D2A
+    classDef bad fill:#FDECEC,stroke:#D64545,stroke-width:1.5px,color:#7A1414
+    classDef cfg fill:#F1EDFF,stroke:#7B61FF,stroke-width:1.5px,color:#2E1F7A
+    class bump cfg
+    class javap,diff,port,verify,regen ours
+    class investigate bad
+    class publish ext
+```
 
 ```bash
 # 1. bump the version

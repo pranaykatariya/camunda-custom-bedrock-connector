@@ -11,7 +11,8 @@
 
 ```bash
 ./mvnw verify          # compiles, runs all unit + integration tests (no external services needed)
-./mvnw package         # target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT.jar
+./mvnw package         # target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT.jar      thin jar for the Camunda connector runtime
+                       # target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT-exec.jar standalone fat jar (java -jar / Docker)
 ```
 
 ## Run locally
@@ -27,7 +28,7 @@ export ORG_AI_GATEWAY_HOST_HEADER=bedrock-gateway.internal.example
 # export ORG_AI_GATEWAY_AUTH_MODE=OAUTH2_CLIENT_CREDENTIALS ORG_AI_TOKEN_URL=… ORG_AI_CLIENT_ID=…
 # export ORG_AI_CLIENT_SECRET=…            # from your secret store, never from a file in the repo
 
-java -jar target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT.jar
+java -jar target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT-exec.jar
 ```
 
 Startup validates the configuration. It fails fast with a list of the offending *property names*,

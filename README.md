@@ -43,7 +43,7 @@ export CAMUNDA_CLIENT_MODE=saas CAMUNDA_CLIENT_CLOUD_CLUSTERID=… CAMUNDA_CLIEN
 export CAMUNDA_CLIENT_AUTH_CLIENTID=… CAMUNDA_CLIENT_AUTH_CLIENTSECRET=…
 export ORG_AI_GATEWAY_URL=https://bedrock-gateway.example.com/bedrock
 export ORG_AI_GATEWAY_HOST_HEADER=bedrock-gateway.internal.example   # placeholder until known
-java -jar target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT.jar
+java -jar target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT-exec.jar
 ```
 
 Then upload `element-templates/*.json` to Modeler, use **AI Agent Task / Sub-process

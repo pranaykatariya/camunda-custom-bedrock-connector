@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q dependency:go-offline
 COPY src/ src/
 # Tests run in CI (./mvnw verify); skip them here to keep image builds fast and hermetic.
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q package -DskipTests \
- && java -Djarmode=tools -jar target/org-ai-agent-connector-runtime-*.jar extract --layers --launcher --destination extracted
+ && java -Djarmode=tools -jar target/org-ai-agent-connector-runtime-*-exec.jar extract --layers --launcher --destination extracted
 
 # ---------------------------------------------------------------------------------------------
 # Runtime stage

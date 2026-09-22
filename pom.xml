@@ -48,6 +48,8 @@
       <groupId>io.camunda.connector</groupId>
       <artifactId>spring-boot-starter-camunda-connectors</artifactId>
       <version>${version.connectors}</version>
+      <!-- Provided by the Camunda connector runtime; still bundled into the -exec jar. -->
+      <scope>provided</scope>
     </dependency>
 
     <!-- Official Camunda AI Agent connector (unmodified) -->
@@ -55,6 +57,8 @@
       <groupId>io.camunda.connector</groupId>
       <artifactId>connector-agentic-ai</artifactId>
       <version>${version.connectors}</version>
+      <!-- Provided by the Camunda connector runtime; still bundled into the -exec jar. -->
+      <scope>provided</scope>
     </dependency>
 
     <dependency>
@@ -122,6 +126,13 @@
             <goals>
               <goal>repackage</goal>
             </goals>
+            <configuration>
+              <!--
+                Keep the plain jar thin (only our classes) so it can be dropped into the Camunda
+                connector runtime; the standalone fat jar is written as *-exec.jar.
+              -->
+              <classifier>exec</classifier>
+            </configuration>
           </execution>
         </executions>
       </plugin>

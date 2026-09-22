@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: org-ai-agent-runtime
+data:
+  # --- Camunda SaaS (hybrid). For Self-Managed use CAMUNDA_CLIENT_MODE=self-managed + addresses.
+  CAMUNDA_CLIENT_MODE: "saas"
+  CAMUNDA_CLIENT_CLOUD_CLUSTERID: "<cluster id>"
+  CAMUNDA_CLIENT_CLOUD_REGION: "<region, e.g. bru-2>"
+  # --- Job types served by this runtime (must match the element templates)
+  CONNECTOR_AI_AGENT_TYPE: "org.ai-gateway:aiagent:1"
+  CONNECTOR_AI_AGENT_JOB_WORKER_TYPE: "org.ai-gateway:aiagent-job-worker:1"
+  # --- Organization Bedrock gateway (every Bedrock AI Agent must use this as its custom endpoint)
+  ORG_AI_GATEWAY_URL: "https://bedrock-gateway.example.com/bedrock"
+  ORG_AI_GATEWAY_HOST_HEADER: "<host[:port] the gateway expects in the Host header>"
+  # PLACEHOLDER_JWT until the organization token generation is plugged in (then CUSTOM),
+  # or OAUTH2_CLIENT_CREDENTIALS with ORG_AI_TOKEN_URL + the Secret below.
+  ORG_AI_GATEWAY_AUTH_MODE: "PLACEHOLDER_JWT"
+  # ORG_AI_TOKEN_URL: "https://login.example.com/oauth2/token"
+  # ORG_AI_TOKEN_SCOPE: "bedrock.invoke"
+  SPRING_PROFILES_ACTIVE: "json-logs"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: org-ai-agent-runtime
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: org-ai-agent-runtime}
+  template:
+    metadata:
+      labels: {app: org-ai-agent-runtime}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: runtime
+          image: registry.example.com/camunda/org-ai-agent-connector-runtime:1.0.0
+          ports:
+            - {name: http, containerPort: 8080}
+          envFrom:
+            - configMapRef: {name: org-ai-agent-runtime}
+            - secretRef: {name: org-ai-agent-runtime}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            requests: {cpu: 250m, memory: 768Mi}
+            limits: {memory: 1Gi}
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            initialDelaySeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir: {}

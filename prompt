@@ -1,0 +1,158 @@
+# Build a Camunda 8.9 AI Agent connector runtime with gateway authentication
+
+Build a Spring Boot connector runtime that hosts Camunda's **standard, unmodified AI Agent
+connector** (Task + Sub-process) and changes exactly one thing: the AWS Bedrock provider must
+authenticate to an internal "organization Bedrock gateway" with HTTP headers
+(`x-bam-token: <token>` plus configurable `Accept` and `Host`) instead of AWS SigV4. Every other
+provider (Anthropic, Azure OpenAI, Vertex AI, OpenAI, OpenAI-compatible) must behave identically to
+the stock connector.
+
+Hard constraint: no fork, no patched classes, no reflection, no AOP. Integrate only through
+Camunda's documented Spring extension points. Agent orchestration, tools, MCP, memory, prompts and
+element semantics stay Camunda's code.
+
+## Build setup
+
+- Maven + wrapper, Java 21, `groupId com.anthrobyte.camunda`,
+  `artifactId org-ai-agent-connector-runtime`, base package `com.anthrobyte.camunda.aiagent`.
+- Import `io.camunda.connector:connector-parent` (version 8.9.12) as a BOM and take **every**
+  transitive version from it, so this project never upgrades something Camunda didn't test with.
+  Hold the connectors version in one property — upgrading Camunda should mean editing one line.
+- Depend on `spring-boot-starter-camunda-connectors` and `connector-agentic-ai` with scope
+  `provided` (the Camunda runtime supplies them when the thin jar is dropped in), and build both a
+  thin jar and a standalone `*-exec.jar`.
+- Run `*Test` and `*IT` in the same surefire execution: the suite must need no external services.
+
+## Integration approach
+
+Investigate how Camunda's agentic-ai auto-configuration builds chat models and find the seam that
+lets an application supply its own factory without modifying Camunda. Register your replacement so
+Camunda's default backs off, and make it a thin router: Bedrock configurations go to your own
+builder, everything else to a factory constructed exactly like Camunda's default bean.
+
+Camunda's Bedrock client setup lives partly in inaccessible methods. Where you must reproduce it
+(timeout derivation, proxy-aware Apache HTTP client, model-parameter mapping), keep **all** of it in
+one clearly-marked class that names its upstream origin, and add a test that compares the request
+body your model sends against the one Camunda's own factory produces.
+
+## Layering
+
+Keep four packages with strict dependency direction:
+
+- **auth** — credentials only; knows nothing of Camunda, HTTP transport or AWS.
+- **transport** — an AWS SDK HTTP client decorator; knows nothing of Camunda.
+- **camunda** — the only Camunda-facing code.
+- **config** — auto-configuration and typed properties under your own prefix
+  (`organization.ai-gateway.auth.*`), never under `camunda.*`, so a future release can't clash.
+
+## Authentication
+
+A provider abstraction returns the headers for the next request and can invalidate rejected ones.
+Ship four modes: a **placeholder unsigned JWT** (so the runtime can be wired end-to-end before real
+token generation exists — it must warn loudly at startup), **OAuth2 client credentials**, **static
+headers**, and **custom** (an application-supplied token source or provider bean).
+
+The token cache is the part that needs care:
+
+- lock-free fast path while the cached token is valid;
+- single-flight refresh, so a burst of concurrent jobs causes one token request, not hundreds;
+- threads waiting on a refresh that failed share that failure instead of retrying serially;
+- bounded waiting, so a hung token endpoint can't pin job worker threads;
+- treat a token as expired slightly before it really is, capping the skew at half the lifetime;
+- invalidate by identity, so concurrent 401s don't each trigger a refresh.
+
+Separate **permanent** from **transient** failures and map them onto LangChain4j's non-retriable and
+retriable exception types, so Camunda's existing job-retry and incident semantics are unchanged.
+Failure messages carry a reason code and optional HTTP status, never a cause, never a response body,
+never anything echoed back from an upstream that could contain a secret.
+
+## Transport
+
+Decorate the AWS SDK's HTTP client so the gateway headers are attached on **every** attempt. Work
+out which SDK hook actually runs per attempt after signing — an interceptor that runs once per
+execution is the wrong one — and document why in the architecture notes.
+
+The decorator must: configure the Bedrock client so no signer can ever run (anonymous credentials
+plus an auth-scheme resolution that only offers no-auth) and strip AWS signing headers as defence in
+depth; replace same-named headers and leave everything else untouched; retry **once** on 401 after
+invalidating, but only when the provider can actually produce different credentials; return all
+other statuses to the SDK unchanged; and fail closed if credentials can't be obtained.
+
+Also fetch credentials before the chat call itself, so a credential failure surfaces as a sanitized
+error with nothing sent and outside LangChain4j's retry loop. A final gateway 401/403 becomes a
+sanitized authentication failure; every other error (LLM 4xx, gateway 5xx, timeouts) is rethrown
+unchanged.
+
+## Endpoint handling
+
+The gateway URL is **not** a runtime setting: each AI Agent element carries it as its custom
+endpoint and the runtime uses it as configured — no allow-list, no scheme restriction. Only a
+missing or unusable URL fails, and it fails closed with no fallback to AWS credentials. Warn at
+startup that any URL an element points at will therefore receive the organization credentials, and
+warn per-job when element AWS credentials or an API key are present and ignored.
+
+## Configuration
+
+Ship an `application.yml` with no secrets — only `${ENV_VAR}` placeholders — that:
+
+- gives the AI Agent Task and Sub-process **custom job types** (`ORG_AI_AGENT_TASK_TYPE`,
+  `ORG_AI_AGENT_SUBPROCESS_TYPE`), because the standard types are already polled by the default
+  runtime, and warns at startup if a standard type is still in use;
+- disables the other connectors bundled in `connector-agentic-ai`, which would otherwise poll their
+  standard job types too;
+- exposes the auth settings as `ORG_AI_GATEWAY_*` / `ORG_AI_*` variables, with the `Host` header
+  defaulting to an obviously-fake placeholder that the runtime warns about.
+
+Validate configuration at startup, reporting **all** problems at once by property name and the
+environment variable that maps to it, never by value. Reject a plain-http token URL unless an
+explicit local-development flag is set, and reject credentials embedded in URLs.
+
+Log a single startup summary line (versions, job types, auth mode). Override the starter's logback
+config so structured key/value fields survive the console pattern, and add an opt-in JSON profile.
+
+## Element templates
+
+Don't hand-write templates. Write a script that downloads Camunda's official AI Agent templates for
+the pinned connectors version and applies a small, reviewable set of edits: new id and name, the
+custom job type, provider fixed to Bedrock, Bedrock auth pinned and its credential fields removed
+(the runtime supplies credentials), custom endpoint made required. Everything else stays as Camunda
+ships it. Record what the template was derived from, and commit the generated output.
+
+## Packaging
+
+Multi-stage Dockerfile on Temurin 21 with a cached dependency layer and Spring Boot layer
+extraction; non-root runtime image; no secrets baked in. Example Kubernetes manifests: a ConfigMap
+of non-secret settings, a placeholder Secret created out-of-band, and a hardened Deployment
+(non-root, read-only root filesystem, dropped capabilities, actuator probes).
+
+## Tests
+
+Around a hundred tests, all offline. Build a small programmable HTTP server on the JDK's built-in
+server to stand in for the token endpoint, the Bedrock gateway and an OpenAI-compatible backend, and
+a harness that boots Camunda's **real** agentic-ai auto-configuration alongside yours, mocking only
+cluster infrastructure.
+
+Prove, at minimum: the expected headers go out and no SigV4 artifact does; element AWS credentials
+are ignored; tokens are cached, refreshed on expiry, and a 401 causes exactly one retry; a token
+outage fails closed with no request sent; concurrent refresh collapses to one token request; the
+request body matches Camunda's own Bedrock factory; non-Bedrock traffic is byte-identical to the
+stock connector; disabling the feature restores Camunda's own beans; configuration errors fail fast
+without leaking values; and a full run at TRACE level never logs a token, client secret or AWS key.
+
+## Documentation
+
+A README that explains the one thing that changed and links five docs: architecture (execution path,
+the extension point, why it's safe, a walkthrough of one request — include diagrams), configuration
+reference, deployment including the hybrid-SaaS and Modeler story, an upgrade procedure that lists
+each assumption about Camunda alongside the test that trips when it breaks, and a security review
+with a threat/control/test matrix.
+
+Ground the architecture notes in the actual resolved artifacts rather than assumptions: verify every
+class and method you name exists in the versions the build resolves.
+
+## Cross-cutting rules
+
+Never log a credential — header names, hosts, paths, statuses and reason codes only, and redact in
+every `toString`. Fail closed. Secrets come from the environment, never from BPMN, process
+variables, the image or the repo. Document *why* rather than *what*, and note the upgrade tripwire
+wherever you reproduce Camunda behaviour.

@@ -9,7 +9,6 @@ import com.anthrobyte.camunda.aiagent.auth.oauth2.ClientCredentialsSettings;
 import com.anthrobyte.camunda.aiagent.auth.oauth2.ClientCredentialsTokenClient;
 import com.anthrobyte.camunda.aiagent.camunda.OrganizationBedrockChatModelBuilder;
 import com.anthrobyte.camunda.aiagent.camunda.OrganizationGatewayChatModelFactory;
-import com.anthrobyte.camunda.aiagent.transport.GatewayEndpointMatcher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.camunda.connector.agenticai.aiagent.framework.langchain4j.ChatModelFactory;
 import io.camunda.connector.agenticai.aiagent.framework.langchain4j.ChatModelFactoryImpl;
@@ -58,19 +57,6 @@ public class OrganizationAuthAutoConfiguration {
 
   private static final Logger LOG = LoggerFactory.getLogger(OrganizationAuthAutoConfiguration.class);
 
-  @Bean
-  public GatewayEndpointMatcher organizationGatewayEndpointMatcher(
-      OrganizationAuthProperties properties) {
-    properties.validate();
-    LOG.atInfo()
-        .addKeyValue("mode", properties.mode())
-        .addKeyValue("allowedEndpoints", properties.allowedEndpoints())
-        .addKeyValue("staticHeaders", staticHeaders(properties).keySet())
-        .log("Organization Bedrock gateway authentication enabled");
-    warnIfHostHeaderIsPlaceholder(properties);
-    return new GatewayEndpointMatcher(properties.allowedEndpoints());
-  }
-
   /**
    * The credential source. Replace it by declaring your own {@link AccessTokenSource} bean (token
    * generation, cached here) or {@link OrganizationAuthenticationProvider} bean (everything), and
@@ -116,8 +102,13 @@ public class OrganizationAuthAutoConfiguration {
       ChatModelHttpProxySupport camundaChatModelHttpProxySupport,
       AgenticAiHttpProxySupport agenticAiHttpProxySupport,
       OrganizationAuthenticationProvider authenticationProvider,
-      GatewayEndpointMatcher endpointMatcher,
       OrganizationAuthProperties properties) {
+    properties.validate();
+    LOG.atInfo()
+        .addKeyValue("mode", properties.mode())
+        .addKeyValue("staticHeaders", staticHeaders(properties).keySet())
+        .log("Organization Bedrock gateway authentication enabled");
+    warnIfHostHeaderIsPlaceholder(properties);
 
     // Identical to Camunda's default ChatModelFactory bean: used for every non-Bedrock provider.
     final ChatModelFactory standardFactory =
@@ -128,19 +119,19 @@ public class OrganizationAuthAutoConfiguration {
             agenticAiProperties,
             agenticAiHttpProxySupport,
             authenticationProvider,
-            endpointMatcher,
-            properties.retryOnUnauthorized(),
-            properties.allowInsecureHttp());
+            properties.retryOnUnauthorized());
 
     LOG.atInfo()
         .addKeyValue("authenticationProvider", authenticationProvider.getClass().getName())
         .addKeyValue("supportsRefresh", authenticationProvider.supportsRefresh())
         .addKeyValue("retryOnUnauthorized", properties.retryOnUnauthorized())
-        .addKeyValue("allowInsecureHttp", properties.allowInsecureHttp())
         .log("Registering organization Bedrock ChatModelFactory (overrides Camunda default bean)");
+    LOG.warn(
+        "The Bedrock custom endpoint configured on an AI Agent element is used as it is: any URL "
+            + "an element points at receives the organization credentials.");
     if (properties.allowInsecureHttp()) {
       LOG.warn(
-          "organization.ai-gateway.auth.allow-insecure-http=true: credentials may be sent over "
+          "organization.ai-gateway.auth.allow-insecure-http=true: the OAuth2 token URL may use "
               + "plain HTTP. Use for local development only.");
     }
 

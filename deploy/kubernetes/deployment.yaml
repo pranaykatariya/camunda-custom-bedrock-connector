@@ -10,8 +10,8 @@ data:
   # --- Job types served by this runtime (must match the element templates)
   CONNECTOR_AI_AGENT_TYPE: "org.ai-gateway:aiagent:1"
   CONNECTOR_AI_AGENT_JOB_WORKER_TYPE: "org.ai-gateway:aiagent-job-worker:1"
-  # --- Organization Bedrock gateway (every Bedrock AI Agent must use this as its custom endpoint)
-  ORG_AI_GATEWAY_URL: "https://bedrock-gateway.example.com/bedrock"
+  # --- Organization Bedrock gateway. The gateway URL itself is configured per AI Agent element
+  # ("Custom endpoint" in the element template), not here.
   ORG_AI_GATEWAY_HOST_HEADER: "<host[:port] the gateway expects in the Host header>"
   # PLACEHOLDER_JWT until the organization token generation is plugged in (then CUSTOM),
   # or OAUTH2_CLIENT_CREDENTIALS with ORG_AI_TOKEN_URL + the Secret below.

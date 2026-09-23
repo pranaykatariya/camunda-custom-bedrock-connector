@@ -64,7 +64,6 @@ class OrganizationBedrockAiAgentIT {
         .withPropertyValues(
             "organization.ai-gateway.auth.enabled=true",
             "organization.ai-gateway.auth.allow-insecure-http=true",
-            "organization.ai-gateway.auth.allowed-endpoints=" + gateway.baseUrl() + "/bedrock",
             "organization.ai-gateway.auth.mode=OAUTH2_CLIENT_CREDENTIALS",
             "organization.ai-gateway.auth.oauth2.token-uri=" + idp.baseUrl() + TOKEN_PATH,
             "organization.ai-gateway.auth.oauth2.client-id=camunda-ai-agent",
@@ -255,7 +254,7 @@ class OrganizationBedrockAiAgentIT {
   }
 
   @Test
-  void bedrockEndpointOutsideTheGatewayFailsClosed() {
+  void bedrockEndpointThatIsNotAUsableUrlFailsClosed() {
     runtime()
         .run(
             ctx -> {
@@ -264,10 +263,9 @@ class OrganizationBedrockAiAgentIT {
                           ctx.getBean(AiAgentFunction.class)
                               .execute(
                                   outboundContext(
-                                      agentTaskInputs(
-                                          "https://bedrock-runtime.eu-central-1.amazonaws.com", null, List.of()))))
+                                      agentTaskInputs("bedrock-gateway.example.com", null, List.of()))))
                   .hasMessageContaining("Organization Bedrock gateway authentication failed")
-                  .hasMessageContaining("custom endpoint is not on the allow list");
+                  .hasMessageContaining("custom endpoint is not an absolute url with a host");
 
               assertThat(idp.requests()).isEmpty();
               assertThat(gateway.requests()).isEmpty();

@@ -9,7 +9,6 @@ import com.anthrobyte.camunda.aiagent.camunda.OrganizationGatewayChatModelFactor
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.Response;
 import com.anthrobyte.camunda.aiagent.support.OpenAiResponses;
-import com.anthrobyte.camunda.aiagent.transport.GatewayEndpointMatcher;
 import io.camunda.connector.agenticai.aiagent.AiAgentFunction;
 import io.camunda.connector.agenticai.aiagent.agent.JobWorkerAgentRequestHandler;
 import io.camunda.connector.agenticai.aiagent.agent.OutboundConnectorAgentRequestHandler;
@@ -68,7 +67,6 @@ class StandardBehaviourRegressionIT {
                   .isExactlyInstanceOf(ChatModelFactoryImpl.class);
               assertThat(ctx).doesNotHaveBean(OrganizationGatewayChatModelFactory.class);
               assertThat(ctx).doesNotHaveBean(OrganizationAuthenticationProvider.class);
-              assertThat(ctx).doesNotHaveBean(GatewayEndpointMatcher.class);
             });
   }
 
@@ -78,7 +76,6 @@ class StandardBehaviourRegressionIT {
         .withPropertyValues(
             "organization.ai-gateway.auth.enabled=false",
             // even a complete (would-be valid) configuration must stay inert
-            "organization.ai-gateway.auth.allowed-endpoints=" + llm.baseUrl() + "/v1",
             "organization.ai-gateway.auth.mode=STATIC_HEADERS",
             "organization.ai-gateway.auth.static-headers[0].name=X-Org",
             "organization.ai-gateway.auth.static-headers[0].value=must-not-be-sent")
@@ -101,18 +98,10 @@ class StandardBehaviourRegressionIT {
 
   private static final String[] ENABLED = {
     "organization.ai-gateway.auth.enabled=true",
-    "organization.ai-gateway.auth.allow-insecure-http=true",
     "organization.ai-gateway.auth.mode=STATIC_HEADERS",
     "organization.ai-gateway.auth.static-headers[0].name=x-bam-token",
     "organization.ai-gateway.auth.static-headers[0].value=must-not-be-sent"
   };
-
-  private String[] enabledWithGatewayOnTheLlmHost() {
-    // Even the OpenAI-compatible endpoint's own host is on the Bedrock allow-list: still no org auth.
-    final String[] props = java.util.Arrays.copyOf(ENABLED, ENABLED.length + 1);
-    props[ENABLED.length] = "organization.ai-gateway.auth.allowed-endpoints=" + llm.baseUrl();
-    return props;
-  }
 
   @Test
   void taskAndSubProcessShareTheSameFrameworkAdapterAndFactory() {
@@ -120,7 +109,7 @@ class StandardBehaviourRegressionIT {
     // through the single Langchain4JAiFrameworkAdapter bean, hence through the one ChatModelFactory
     // bean that this project overrides.
     contextRunner()
-        .withPropertyValues(enabledWithGatewayOnTheLlmHost())
+        .withPropertyValues(ENABLED)
         .run(
             ctx -> {
               final var adapter = ctx.getBean(Langchain4JAiFrameworkAdapter.class);
@@ -140,7 +129,7 @@ class StandardBehaviourRegressionIT {
   @Test
   void enabled_openAiCompatibleStillUsesElementApiKeyAndNoOrganizationHeaders() {
     contextRunner()
-        .withPropertyValues(enabledWithGatewayOnTheLlmHost())
+        .withPropertyValues(ENABLED)
         .run(
             ctx -> {
               final AgentResponse response =
@@ -165,7 +154,7 @@ class StandardBehaviourRegressionIT {
                     (AgentResponse)
                         ctx.getBean(AiAgentFunction.class).execute(outboundContext(inputs("k")))));
     contextRunner()
-        .withPropertyValues(enabledWithGatewayOnTheLlmHost())
+        .withPropertyValues(ENABLED)
         .run(
             ctx ->
                 responses.add(

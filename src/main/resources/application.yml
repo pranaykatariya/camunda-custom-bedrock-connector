@@ -61,12 +61,11 @@ organization:
   ai-gateway:
     auth:
       # false = runtime behaves exactly like the standard Camunda AI Agent connector.
-      # true requires ORG_AI_GATEWAY_URL; startup fails with a message naming it if it is missing.
       enabled: ${ORG_AI_GATEWAY_AUTH_ENABLED:true}
 
-      # Bedrock gateway base URL(s). The element's Bedrock "Custom endpoint" must be under one of
-      # them, otherwise the job fails closed. Comma-separated list in the env var.
-      allowed-endpoints: ${ORG_AI_GATEWAY_URL:}
+      # The gateway URL is NOT configured here. Every Bedrock AI Agent element supplies its own
+      # "Custom endpoint" and the runtime uses it as it is: no allow list, no scheme restriction.
+      # Organization credentials are therefore sent to whatever URL an element points at.
 
       # PLACEHOLDER_JWT | OAUTH2_CLIENT_CREDENTIALS | STATIC_HEADERS | CUSTOM
       # PLACEHOLDER_JWT sends a random unsigned JWT until the real token generation is plugged in

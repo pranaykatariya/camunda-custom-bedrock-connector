@@ -146,9 +146,9 @@ def customize(template: dict, spec: dict, job_type: str, gateway_url: str | None
             prop["optional"] = False
             prop["constraints"] = {"notEmpty": True}
             prop["tooltip"] = (
-                "Base URL of the organization Bedrock gateway. It must be on the runtime's allow-list "
-                "(ORG_AI_GATEWAY_URL). Authentication is handled by the connector runtime; no AWS "
-                "keys are needed."
+                "Base URL of the organization Bedrock gateway. The runtime sends the organization "
+                "credentials to exactly this URL; it is not validated against an allow-list. "
+                "Authentication is handled by the connector runtime; no AWS keys are needed."
             )
             if gateway_url:
                 prop["value"] = gateway_url

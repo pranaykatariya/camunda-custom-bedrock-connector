@@ -23,7 +23,6 @@ import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.RecordedRequest;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.Response;
 import com.anthrobyte.camunda.aiagent.support.MutableClock;
-import com.anthrobyte.camunda.aiagent.transport.GatewayEndpointMatcher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.UserMessage;
@@ -84,18 +83,13 @@ class OrganizationBedrockChatModelBuilderTest {
   }
 
   private OrganizationBedrockChatModelBuilder builder(
-      OrganizationAuthenticationProvider provider, boolean retryOnUnauthorized, boolean allowInsecureHttp) {
+      OrganizationAuthenticationProvider provider, boolean retryOnUnauthorized) {
     return new OrganizationBedrockChatModelBuilder(
-        agenticAiProperties(),
-        agenticAiHttpProxySupport(),
-        provider,
-        new GatewayEndpointMatcher(List.of(URI.create(endpoint()))),
-        retryOnUnauthorized,
-        allowInsecureHttp);
+        agenticAiProperties(), agenticAiHttpProxySupport(), provider, retryOnUnauthorized);
   }
 
   private OrganizationBedrockChatModelBuilder builder() {
-    return builder(provider(tokenSource), true, true);
+    return builder(provider(tokenSource), true);
   }
 
   private static ChatResponse chat(CloseableChatModel model) {
@@ -218,7 +212,7 @@ class OrganizationBedrockChatModelBuilderTest {
                 ? Response.json(401, "{}")
                 : Response.json(200, BedrockResponses.text("ok")));
 
-    try (var model = builder(provider(tokenSource), false, true).create(bedrock(endpoint()))) {
+    try (var model = builder(provider(tokenSource), false).create(bedrock(endpoint()))) {
       assertThatThrownBy(() -> chat(model)).isInstanceOf(OrganizationAuthenticationException.class);
       assertThat(gateway.callCount(CONVERSE)).isEqualTo(1);
 
@@ -263,7 +257,7 @@ class OrganizationBedrockChatModelBuilderTest {
               AuthenticationFailureReason.TOKEN_REQUEST_REJECTED, 401, "invalid_client");
         };
 
-    try (var model = builder(provider(rejecting), true, true).create(bedrock(endpoint()))) {
+    try (var model = builder(provider(rejecting), true).create(bedrock(endpoint()))) {
       assertThatThrownBy(() -> chat(model))
           .isInstanceOf(OrganizationAuthenticationException.class)
           .hasMessage(
@@ -282,7 +276,7 @@ class OrganizationBedrockChatModelBuilderTest {
               AuthenticationFailureReason.TOKEN_ENDPOINT_UNREACHABLE);
         };
 
-    try (var model = builder(provider(unavailable), true, true).create(bedrock(endpoint()))) {
+    try (var model = builder(provider(unavailable), true).create(bedrock(endpoint()))) {
       assertThatThrownBy(() -> chat(model))
           .isInstanceOf(OrganizationAuthenticationUnavailableException.class)
           .hasMessageContaining("the token endpoint could not be reached");
@@ -298,7 +292,7 @@ class OrganizationBedrockChatModelBuilderTest {
           throw new IllegalStateException("signing key sk-live-123 not found");
         };
 
-    try (var model = builder(provider(buggy), true, true).create(bedrock(endpoint()))) {
+    try (var model = builder(provider(buggy), true).create(bedrock(endpoint()))) {
       assertThatThrownBy(() -> chat(model))
           .isInstanceOf(OrganizationAuthenticationException.class)
           .hasMessageContaining("the organization token source failed")
@@ -309,23 +303,29 @@ class OrganizationBedrockChatModelBuilderTest {
   }
 
   @Test
-  void missingNonHttpsOrForeignEndpointsAreRejectedBeforeAnyClientIsBuilt() {
-    final var strict = builder(provider(tokenSource), true, false);
-
-    assertThatThrownBy(() -> strict.create(bedrock(null)))
+  void onlyMissingOrUnusableEndpointsAreRejectedBeforeAnyClientIsBuilt() {
+    assertThatThrownBy(() -> builder().create(bedrock(null)))
         .isInstanceOf(OrganizationAuthenticationException.class)
         .hasMessageContaining("[custom endpoint is not set]");
-    assertThatThrownBy(() -> strict.create(bedrock(endpoint())))
+    assertThatThrownBy(() -> builder().create(bedrock("   ")))
         .isInstanceOf(OrganizationAuthenticationException.class)
-        .hasMessageContaining("[custom endpoint is not https]");
-    assertThatThrownBy(() -> builder().create(bedrock("http://127.0.0.1:1/bedrock")))
-        .isInstanceOf(OrganizationAuthenticationException.class)
-        .hasMessageContaining("[custom endpoint is not on the allow list]");
-    assertThatThrownBy(() -> builder().create(bedrock(gateway.baseUrl() + "/bedrock-other")))
+        .hasMessageContaining("[custom endpoint is not set]");
+    assertThatThrownBy(() -> builder().create(bedrock("bedrock-gateway.example.com/bedrock")))
         .isInstanceOf(OrganizationAuthenticationException.class)
         .extracting(e -> ((OrganizationAuthenticationException) e).reason())
-        .isEqualTo(AuthenticationFailureReason.ENDPOINT_NOT_PERMITTED);
+        .isEqualTo(AuthenticationFailureReason.ENDPOINT_NOT_CONFIGURED);
     assertThat(issuedTokens).hasValue(0);
+    assertThat(gateway.requests()).isEmpty();
+  }
+
+  @Test
+  void anyConfiguredEndpointIsUsedAsTheGateway() {
+    // No allow list and no scheme check: a plain-http endpoint on another host is taken as it is.
+    final String elsewhere = "http://127.0.0.1:1/somewhere-else";
+    try (var model = builder().create(bedrock(elsewhere))) {
+      assertThat(clientOf(model).serviceClientConfiguration().endpointOverride())
+          .contains(URI.create(elsewhere));
+    }
     assertThat(gateway.requests()).isEmpty();
   }
 

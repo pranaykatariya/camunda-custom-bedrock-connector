@@ -1,11 +1,10 @@
 package com.anthrobyte.camunda.aiagent.camunda;
 
-import static com.anthrobyte.camunda.aiagent.auth.AuthenticationFailureReason.ENDPOINT_NOT_PERMITTED;
+import static com.anthrobyte.camunda.aiagent.auth.AuthenticationFailureReason.ENDPOINT_NOT_CONFIGURED;
 
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationException;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
 import com.anthrobyte.camunda.aiagent.transport.AuthenticatingSdkHttpClientBuilder;
-import com.anthrobyte.camunda.aiagent.transport.GatewayEndpointMatcher;
 import dev.langchain4j.model.bedrock.BedrockChatModel;
 import io.camunda.connector.agenticai.aiagent.framework.langchain4j.CloseableChatModel;
 import io.camunda.connector.agenticai.aiagent.framework.langchain4j.CloseableChatModelDelegate;
@@ -18,7 +17,6 @@ import io.camunda.connector.agenticai.common.AgenticAiHttpProxySupport;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
-import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider;
@@ -40,9 +38,9 @@ import software.amazon.awssdk.services.bedrockruntime.auth.scheme.BedrockRuntime
  *       (anonymous credentials plus the no-auth scheme, as in Camunda's own API-key mode), and
  *       {@link com.anthrobyte.camunda.aiagent.transport.AuthenticatingSdkHttpClient} adds the
  *       organization headers to every HTTP attempt.
- *   <li><b>Endpoint.</b> The element's custom endpoint is required and must be an approved gateway
- *       URL (allow-list, https). Otherwise the job fails closed: it never falls back to AWS or to
- *       Camunda's built-in Bedrock authentication.
+ *   <li><b>Endpoint.</b> The element's custom endpoint is required and is used exactly as
+ *       configured: any absolute http(s) URL is accepted. Without one the job fails closed; it
+ *       never falls back to AWS or to Camunda's built-in Bedrock authentication.
  * </ol>
  */
 public class OrganizationBedrockChatModelBuilder {
@@ -56,28 +54,22 @@ public class OrganizationBedrockChatModelBuilder {
   private final Duration defaultTimeout;
   private final AgenticAiHttpProxySupport proxySupport;
   private final OrganizationAuthenticationProvider authenticationProvider;
-  private final GatewayEndpointMatcher endpointMatcher;
   private final boolean retryOnUnauthorized;
-  private final boolean allowInsecureHttp;
 
   public OrganizationBedrockChatModelBuilder(
       AgenticAiConnectorsConfigurationProperties agenticAiProperties,
       AgenticAiHttpProxySupport proxySupport,
       OrganizationAuthenticationProvider authenticationProvider,
-      GatewayEndpointMatcher endpointMatcher,
-      boolean retryOnUnauthorized,
-      boolean allowInsecureHttp) {
+      boolean retryOnUnauthorized) {
     this.defaultTimeout = agenticAiProperties.aiagent().chatModel().api().defaultTimeout();
     this.proxySupport = proxySupport;
     this.authenticationProvider = authenticationProvider;
-    this.endpointMatcher = endpointMatcher;
     this.retryOnUnauthorized = retryOnUnauthorized;
-    this.allowInsecureHttp = allowInsecureHttp;
   }
 
   public CloseableChatModel create(BedrockProviderConfiguration configuration) {
     final BedrockConnection connection = configuration.bedrock();
-    final URI endpoint = approvedEndpoint(connection.endpoint());
+    final URI endpoint = gatewayEndpoint(connection.endpoint());
     warnIfElementCredentialsAreIgnored(connection.authentication());
     final Duration timeout = CamundaBedrockClientParity.deriveTimeout(connection.timeouts(), defaultTimeout);
 
@@ -130,13 +122,15 @@ public class OrganizationBedrockChatModelBuilder {
                 CamundaBedrockClientParity.apacheHttpClientBuilder(
                     proxySupport.getProxyConfiguration(), endpoint, timeout),
                 authenticationProvider,
-                endpointMatcher,
                 retryOnUnauthorized))
         .build();
   }
 
-  /** The element's custom endpoint, if it is an approved https gateway URL. Fails closed otherwise. */
-  private URI approvedEndpoint(String endpoint) {
+  /**
+   * The element's custom endpoint. It is the gateway URL: whatever is configured on the element is
+   * used, with no allow list and no scheme restriction. Only a missing or unusable URL fails.
+   */
+  private URI gatewayEndpoint(String endpoint) {
     if (endpoint == null || endpoint.isBlank()) {
       throw endpointRejected(null, "custom endpoint is not set");
     }
@@ -146,34 +140,26 @@ public class OrganizationBedrockChatModelBuilder {
     } catch (IllegalArgumentException e) {
       throw endpointRejected(null, "custom endpoint is not a valid url");
     }
-    final String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-    if (!scheme.equals("https") && !(allowInsecureHttp && scheme.equals("http"))) {
-      throw endpointRejected(uri, "custom endpoint is not https");
-    }
-    if (!endpointMatcher.matches(uri)) {
-      throw endpointRejected(uri, "custom endpoint is not on the allow list");
+    if (!uri.isAbsolute() || uri.getHost() == null) {
+      throw endpointRejected(uri, "custom endpoint is not an absolute url with a host");
     }
     LOG.atDebug()
         .addKeyValue("endpointHost", uri.getHost())
         .addKeyValue("endpointPath", uri.getRawPath())
-        .log("Bedrock custom endpoint approved");
+        .log("Bedrock custom endpoint resolved");
     return uri;
   }
 
-  /**
-   * Logs host, port and path only (never user-info) next to the allow list, which is configuration
-   * already logged at startup, so an operator can spot the mismatch directly.
-   */
+  /** Logs scheme, host, port and path only, never user-info, so an operator can spot the typo. */
   private OrganizationAuthenticationException endpointRejected(URI endpoint, String detail) {
     LOG.atWarn()
         .addKeyValue("endpointScheme", endpoint == null ? null : endpoint.getScheme())
         .addKeyValue("endpointHost", endpoint == null ? null : endpoint.getHost())
         .addKeyValue("endpointPort", endpoint == null || endpoint.getPort() == -1 ? null : endpoint.getPort())
         .addKeyValue("endpointPath", endpoint == null ? null : endpoint.getRawPath())
-        .addKeyValue("allowedEndpoints", endpointMatcher)
         .addKeyValue("problem", detail)
-        .log("Rejecting Bedrock endpoint that is not an approved organization gateway");
-    return new OrganizationAuthenticationException(ENDPOINT_NOT_PERMITTED, null, detail);
+        .log("Rejecting Bedrock endpoint: no usable organization gateway URL on the element");
+    return new OrganizationAuthenticationException(ENDPOINT_NOT_CONFIGURED, null, detail);
   }
 
   private static void warnIfElementCredentialsAreIgnored(AwsAuthentication authentication) {

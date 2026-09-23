@@ -20,7 +20,7 @@ flowchart TB
         http["AuthenticatingSdkHttpClient<br/>header added per HTTP attempt"]
     end
 
-    gw["Organization Bedrock gateway<br/>HTTPS · allow-listed only"]
+    gw["The endpoint configured on the element<br/>(intended: the organization Bedrock gateway)"]
 
     subgraph never["Never reaches"]
         direction LR
@@ -56,16 +56,18 @@ accept it: treat `PLACEHOLDER_JWT` as not production-ready.
 ## Controls
 
 Every Bedrock call passes these checkpoints in order. Any "no" fails the job with a sanitized
-exception. A failure at checkpoints 1–3 happens before anything is sent:
+exception. A failure at checkpoint 1 or 2 happens before anything is sent.
+
+**The endpoint itself is not a control.** There is no allow-list: the credentials are sent to the
+URL configured on the element (see the threat table below).
 
 ```mermaid
 flowchart TD
     start(["Bedrock AI Agent job"])
-    c1{"1 · Element endpoint set,<br/>https and on the allow-list?<br/>(model creation)"}
+    c1{"1 · Element endpoint set and<br/>a usable absolute URL?<br/>(model creation)"}
     c2{"2 · Credentials obtained?<br/>(before the model call)"}
-    c3{"3 · Request URI on the allow-list?<br/>(every HTTP attempt)"}
-    c4["4 · Signing headers stripped<br/>noAuth-only scheme: no SigV4, no bearer"]
-    c5{"5 · Gateway accepts<br/>the credentials?"}
+    c4["3 · Signing headers stripped<br/>noAuth-only scheme: no SigV4, no bearer"]
+    c5{"4 · Gateway accepts<br/>the credentials?"}
     retry["Invalidate token,<br/>fetch a fresh one, resend once"]
     ok(["Response returned to<br/>LangChain4j and Camunda"])
     fail["Job fails · sanitized exception<br/>no payload, no secret, no cause<br/>→ Camunda incident"]
@@ -74,9 +76,7 @@ flowchart TD
     c1 -- "no" --> fail
     c1 -- "yes" --> c2
     c2 -- "no" --> fail
-    c2 -- "yes" --> c3
-    c3 -- "no" --> fail
-    c3 -- "yes" --> c4 --> c5
+    c2 -- "yes" --> c4 --> c5
     c5 -- "yes, or any non-auth status" --> ok
     c5 -- "401 (first time)" --> retry --> c4
     c5 -- "second 401, or 403" --> fail
@@ -84,7 +84,7 @@ flowchart TD
     classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
     classDef ext fill:#E6F6EC,stroke:#2E9E5B,stroke-width:1.5px,color:#0F4D2A
     classDef bad fill:#FDECEC,stroke:#D64545,stroke-width:1.5px,color:#7A1414
-    class c1,c2,c3,c4,c5,retry ours
+    class c1,c2,c4,c5,retry ours
     class start,ok ext
     class fail bad
 ```
@@ -100,7 +100,7 @@ flowchart LR
         p3["TOKEN_SOURCE_FAILED"]
         p4["GATEWAY_REJECTED_CREDENTIALS · 401"]
         p5["GATEWAY_ACCESS_DENIED · 403"]
-        p6["ENDPOINT_NOT_PERMITTED"]
+        p6["ENDPOINT_NOT_CONFIGURED"]
     end
     subgraph transient["Transient · OrganizationAuthenticationUnavailableException"]
         direction TB
@@ -125,11 +125,11 @@ flowchart LR
 
 | Threat | Control | Test |
 |---|---|---|
-| Modeler points the Bedrock endpoint at an attacker host to harvest organization tokens | Endpoint required and checked against the allow-list when the model is created, and again on the actual request URI of every attempt. Scheme, host and port must match exactly; the path must match on a segment boundary; `..` is normalized; user-info is rejected. | `GatewayEndpointMatcherTest`, `AuthenticatingSdkHttpClientTest#refusesNonGatewayTargets…`, `OrganizationBedrockChatModelBuilderTest#missingNonHttpsOrForeignEndpoints…` |
-| Falling back to AWS or to Camunda's built-in Bedrock auth | Every Bedrock config goes to the organization path; element AWS keys/API key are ignored; the client resolves only the no-auth scheme | `OrganizationGatewayChatModelFactoryTest#everyBedrockConfiguration…`, `…#bedrockOutsideTheGatewayIsRejected…` |
+| Modeler points the Bedrock endpoint at an attacker host to harvest organization tokens | **Not mitigated in the runtime, by design.** Any endpoint configured on the element receives the organization credentials; only a missing or unusable URL is refused. The controls are outside this runtime: who may model, review and deploy processes with the organization AI Agent templates, and egress restrictions on the pod's network. | `OrganizationBedrockChatModelBuilderTest#onlyMissingOrUnusableEndpoints…`, `…#anyConfiguredEndpointIsUsedAsTheGateway` |
+| Falling back to AWS or to Camunda's built-in Bedrock auth | Every Bedrock config goes to the organization path; element AWS keys/API key are ignored; the client resolves only the no-auth scheme | `OrganizationGatewayChatModelFactoryTest#everyBedrockConfiguration…`, `…#bedrockOnAnyOtherHostStillGetsOrganizationAuthentication` |
 | Unauthenticated call when the token cannot be obtained | Credentials are fetched before the model is called and on every attempt; failures throw, nothing is sent | `…#rejectedTokenRequestFailsClosed…`, `…#unavailableTokenEndpoint…`, `…#unexpectedTokenSourceError…`, `OrganizationBedrockAiAgentIT#identityProviderOutage…` |
 | SigV4 or env bearer token leaking to the gateway | `authSchemeProvider` resolves only `smithy.api#noAuth`; `Authorization`/`X-Amz-*` signing headers stripped unless they are organization headers | `…#sendsOrganizationHeadersAndNoAwsSignature`, `AuthenticatingSdkHttpClientTest#…DropsAwsSigningHeaders` |
-| Credentials sent in clear text | `https` required for the gateway (config and per element) and the token endpoint; `allow-insecure-http` exists for local dev only | `OrganizationAuthAutoConfigurationTest#invalidConfiguration…`, `…#missingNonHttps…` |
+| Credentials sent in clear text | `https` required for the OAuth2 token endpoint (`allow-insecure-http` exists for local dev only). The gateway endpoint's scheme is **not** checked: a `http://` endpoint on an element sends the token in the clear. | `OrganizationAuthAutoConfigurationTest#invalidConfiguration…` |
 | Credentials follow a redirect | Token client uses `Redirect.NEVER`; the AWS SDK Apache client does not follow redirects | code review |
 | Secrets in logs | Only names, hosts, paths, status codes and OAuth error *codes* are logged | `LoggingIT` (TRACE), `PlaceholderJwtTokenSourceTest`, `AuthenticatingSdkHttpClientTest` |
 | Secrets in exception messages (these become Camunda incidents) | Fixed message templates; remote detail only if it is a short lowercase code; no cause attached; unexpected token-source exceptions replaced by `TOKEN_SOURCE_FAILED` | `GatewayCredentialsTest`, `CachingTokenAuthenticationProviderTest#unexpectedSourceException…` |
@@ -138,6 +138,9 @@ flowchart LR
 
 ## Operational guidance
 
+* Restrict who can deploy processes using the organization AI Agent templates, and review the
+  "Custom endpoint" of each one: it is the only thing deciding where the organization credentials
+  go. Consider egress network policies on the runtime pods as a second line.
 * Replace `PLACEHOLDER_JWT` with the organization token source before production.
 * Set `ORG_AI_GATEWAY_HOST_HEADER` to the real value; the default is a placeholder.
 * Do not set DEBUG on `org.apache.http.headers`/`org.apache.http.wire` in production.

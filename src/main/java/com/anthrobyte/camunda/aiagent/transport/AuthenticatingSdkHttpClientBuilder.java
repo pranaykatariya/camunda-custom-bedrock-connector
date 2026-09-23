@@ -21,17 +21,14 @@ public final class AuthenticatingSdkHttpClientBuilder
 
   private final SdkHttpClient.Builder<?> delegate;
   private final OrganizationAuthenticationProvider authenticationProvider;
-  private final GatewayEndpointMatcher endpointMatcher;
   private final boolean retryOnUnauthorized;
 
   public AuthenticatingSdkHttpClientBuilder(
       SdkHttpClient.Builder<?> delegate,
       OrganizationAuthenticationProvider authenticationProvider,
-      GatewayEndpointMatcher endpointMatcher,
       boolean retryOnUnauthorized) {
     this.delegate = delegate;
     this.authenticationProvider = authenticationProvider;
-    this.endpointMatcher = endpointMatcher;
     this.retryOnUnauthorized = retryOnUnauthorized;
   }
 
@@ -39,13 +36,9 @@ public final class AuthenticatingSdkHttpClientBuilder
   public SdkHttpClient buildWithDefaults(AttributeMap serviceDefaults) {
     final SdkHttpClient client =
         new AuthenticatingSdkHttpClient(
-            delegate.buildWithDefaults(serviceDefaults),
-            authenticationProvider,
-            endpointMatcher,
-            retryOnUnauthorized);
+            delegate.buildWithDefaults(serviceDefaults), authenticationProvider, retryOnUnauthorized);
     LOG.atDebug()
         .addKeyValue("delegateClient", client.clientName())
-        .addKeyValue("allowedEndpoints", endpointMatcher)
         .addKeyValue("retryOnUnauthorized", retryOnUnauthorized)
         .log("Authenticating HTTP client for organization Bedrock gateway built");
     return client;

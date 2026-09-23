@@ -1,9 +1,6 @@
 package com.anthrobyte.camunda.aiagent.transport;
 
-import static com.anthrobyte.camunda.aiagent.auth.AuthenticationFailureReason.ENDPOINT_NOT_PERMITTED;
-
 import com.anthrobyte.camunda.aiagent.auth.GatewayCredentials;
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationException;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
 import java.io.IOException;
 import java.time.Duration;
@@ -31,9 +28,9 @@ import software.amazon.awssdk.http.SdkHttpResponse;
  * <p>Behaviour:
  *
  * <ul>
- *   <li><b>Fail closed.</b> Credentials are only attached when the target URL matches the gateway
- *       allow-list. Any other URL throws without sending anything. If the credentials cannot be
- *       obtained, nothing is sent.
+ *   <li><b>Fail closed.</b> The organization headers are attached to every request the Bedrock
+ *       client makes; the target URL is the endpoint configured on the element and is used as it
+ *       is. If the credentials cannot be obtained, nothing is sent.
  *   <li><b>Header mode, never SigV4.</b> Headers with the same name as a credential header are
  *       replaced, and AWS signing headers ({@code Authorization}, {@code X-Amz-Date}, {@code
  *       X-Amz-Security-Token}, {@code X-Amz-Content-Sha256}) are removed unless the organization
@@ -56,29 +53,19 @@ public final class AuthenticatingSdkHttpClient implements SdkHttpClient {
 
   private final SdkHttpClient delegate;
   private final OrganizationAuthenticationProvider authenticationProvider;
-  private final GatewayEndpointMatcher endpointMatcher;
   private final boolean retryOnUnauthorized;
 
   public AuthenticatingSdkHttpClient(
       SdkHttpClient delegate,
       OrganizationAuthenticationProvider authenticationProvider,
-      GatewayEndpointMatcher endpointMatcher,
       boolean retryOnUnauthorized) {
     this.delegate = delegate;
     this.authenticationProvider = authenticationProvider;
-    this.endpointMatcher = endpointMatcher;
     this.retryOnUnauthorized = retryOnUnauthorized;
   }
 
   @Override
   public ExecutableHttpRequest prepareRequest(HttpExecuteRequest request) {
-    final SdkHttpRequest httpRequest = request.httpRequest();
-    if (!endpointMatcher.matches(httpRequest.getUri())) {
-      LOG.atError()
-          .addKeyValue("targetHost", httpRequest.host())
-          .log("Refusing to send organization credentials to a non-gateway endpoint");
-      throw new OrganizationAuthenticationException(ENDPOINT_NOT_PERMITTED);
-    }
     return new AuthenticatedCall(request);
   }
 
@@ -267,6 +254,6 @@ public final class AuthenticatingSdkHttpClient implements SdkHttpClient {
 
   @Override
   public String toString() {
-    return "AuthenticatingSdkHttpClient{" + endpointMatcher + "}";
+    return "AuthenticatingSdkHttpClient{" + delegate.clientName() + "}";
   }
 }

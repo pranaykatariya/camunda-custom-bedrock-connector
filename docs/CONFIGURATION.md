@@ -60,13 +60,18 @@ Do **not** set `CAMUNDA_CONNECTOR_RUNTIME_SAAS` on this runtime. Camunda then re
 
 | Property | Env variable | Default | Description |
 |---|---|---|---|
-| `enabled` | `ORG_AI_GATEWAY_AUTH_ENABLED` | `true` (yml) / `false` (code) | Master switch. `false` = exactly the standard connector. With `true`, startup fails with a message naming `ORG_AI_GATEWAY_URL` if it is missing. |
-| `allowed-endpoints` | `ORG_AI_GATEWAY_URL` | – (**required**) | Comma-separated Bedrock gateway base URLs. Every Bedrock AI Agent must use one as its custom endpoint (same scheme, host and port; path on a segment boundary). Anything else fails the job. |
+| `enabled` | `ORG_AI_GATEWAY_AUTH_ENABLED` | `true` (yml) / `false` (code) | Master switch. `false` = exactly the standard connector. |
 | `mode` | `ORG_AI_GATEWAY_AUTH_MODE` | `PLACEHOLDER_JWT` | `PLACEHOLDER_JWT`, `OAUTH2_CLIENT_CREDENTIALS`, `STATIC_HEADERS` or `CUSTOM`. |
 | `retry-on-unauthorized` | – | `true` | After a gateway 401, refresh the token and resend once. The token is invalidated either way. |
-| `allow-insecure-http` | – | `false` | Permit `http://` gateway/token URLs. **Local development only.** |
+| `allow-insecure-http` | – | `false` | Permit an `http://` OAuth2 token URL. **Local development only.** |
 | `static-headers[n].name` / `.value` | – | `Accept: application/json`, `Host: ${ORG_AI_GATEWAY_HOST_HEADER}` | Headers sent on every request next to the token. In `STATIC_HEADERS` mode they are the credentials. `Host` must be `host[:port]`, not a URL. |
 | `static-headers[1].value` (Host) | `ORG_AI_GATEWAY_HOST_HEADER` | `bedrock-gateway.placeholder.invalid` (**placeholder**) | The `Host` header value the gateway expects. |
+
+**The gateway URL is not configured here.** Each Bedrock AI Agent element carries its own
+"Custom endpoint", and the runtime uses it exactly as configured: no allow-list, no scheme check.
+Only an endpoint that is missing or not an absolute URL with a host fails the job
+(`ENDPOINT_NOT_CONFIGURED`). Organization credentials therefore go to whatever URL an element
+points at, so who may model and deploy an organization AI Agent is the control that matters.
 
 #### Which credentials each `mode` produces
 
@@ -177,24 +182,18 @@ How `AuthenticatingSdkHttpClient` turns the AWS SDK's request into that, on ever
 ```mermaid
 flowchart LR
     sdk["Request from the AWS SDK<br/>POST …/model/MODEL_ID/converse<br/>Content-Type · body"]
-    allow{"URI on the<br/>allow-list?"}
-    refuse["Refused<br/>ENDPOINT_NOT_PERMITTED<br/>nothing sent"]
     strip["Remove<br/>Authorization · X-Amz-Date<br/>X-Amz-Security-Token · X-Amz-Content-Sha256<br/>and any header named like an org header"]
     add["Add<br/>x-bam-token · Accept · Host"]
     wire(["Sent unsigned<br/>to the gateway"])
 
-    sdk --> allow
-    allow -- "no" --> refuse
-    allow -- "yes" --> strip --> add --> wire
+    sdk --> strip --> add --> wire
 
     classDef cam fill:#E8F0FE,stroke:#4A7BD0,stroke-width:1.5px,color:#1A3A6B
     classDef ours fill:#FFF1E0,stroke:#F08A24,stroke-width:1.5px,color:#6B3A00
     classDef ext fill:#E6F6EC,stroke:#2E9E5B,stroke-width:1.5px,color:#0F4D2A
-    classDef bad fill:#FDECEC,stroke:#D64545,stroke-width:1.5px,color:#7A1414
     class sdk cam
-    class allow,strip,add ours
+    class strip,add ours
     class wire ext
-    class refuse bad
 ```
 
 ## Plugging in the organization JWT
@@ -265,10 +264,9 @@ message (`… call succeeded gatewayHost="gw" httpStatus="200" durationMs="812"`
 
 | Level | What is logged |
 |---|---|
-| `INFO` | Startup: runtime/connectors version, AI Agent job types, mode, allowed endpoints, header *names*, the bean override. Per agent turn: model creation (host, path, region, model, timeout), every gateway HTTP exchange (method, path, status, duration, attempt, AWS request id), `Bedrock chat call completed` (model, finish reason, tool calls requested, input/output/total tokens, duration). Non-Bedrock providers routed to Camunda's factory. Token refreshed (expiry, lifetime, refresh count), missing `expires_in`, slow concurrent refresh waits. 401 retry and its outcome, invalidation, SDK aborts. |
-| `WARN` | Placeholder token in use, Host header still the placeholder, org auth disabled, standard AI Agent job types in use, token request/refresh failures, gateway 5xx/429, network errors, final 401/403, `Bedrock chat call failed` (error type, reason, status, duration), rejected Bedrock endpoints (with the allow list), AWS keys on the element ignored, `allow-insecure-http` |
-| `ERROR` | Credentials refused for a non-allow-listed URL at request time (should never happen) |
-| `DEBUG` | `Calling organization Bedrock gateway` (host, path, header names, attempt), replaced header names, why a URL did not match the allow list (`hint`: host/scheme/port/path), applied model parameters, proxy selection, gateway 401/403 responses |
+| `INFO` | Startup: runtime/connectors version, AI Agent job types, mode, header *names*, the bean override. Per agent turn: model creation (host, path, region, model, timeout), every gateway HTTP exchange (method, path, status, duration, attempt, AWS request id), `Bedrock chat call completed` (model, finish reason, tool calls requested, input/output/total tokens, duration). Non-Bedrock providers routed to Camunda's factory. Token refreshed (expiry, lifetime, refresh count), missing `expires_in`, slow concurrent refresh waits. 401 retry and its outcome, invalidation, SDK aborts. |
+| `WARN` | Placeholder token in use, Host header still the placeholder, org auth disabled, standard AI Agent job types in use, token request/refresh failures, gateway 5xx/429, network errors, final 401/403, `Bedrock chat call failed` (error type, reason, status, duration), Bedrock endpoints that are missing or unusable, the reminder that the element endpoint is used as it is, AWS keys on the element ignored, `allow-insecure-http` |
+| `DEBUG` | `Calling organization Bedrock gateway` (host, path, header names, attempt), replaced header names, the resolved element endpoint (host, path), applied model parameters, proxy selection, gateway 401/403 responses |
 | `TRACE` | Cached-token hits |
 
 At every level, the logs never contain tokens, client secrets, header values, element AWS keys,

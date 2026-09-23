@@ -154,7 +154,7 @@
       "constraints": {
         "notEmpty": true
       },
-      "tooltip": "Base URL of the organization Bedrock gateway. It must be on the runtime's allow-list (ORG_AI_GATEWAY_URL). Authentication is handled by the connector runtime; no AWS keys are needed."
+      "tooltip": "Base URL of the organization Bedrock gateway. The runtime sends the organization credentials to exactly this URL; it is not validated against an allow-list. Authentication is handled by the connector runtime; no AWS keys are needed."
     },
     {
       "id": "provider.bedrock.authentication.type",

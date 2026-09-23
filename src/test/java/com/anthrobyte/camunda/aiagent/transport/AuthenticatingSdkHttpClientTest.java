@@ -6,7 +6,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import com.anthrobyte.camunda.aiagent.auth.GatewayCredentials;
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationException;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.Response;
@@ -78,8 +77,7 @@ class AuthenticatingSdkHttpClientTest {
   }
 
   private AuthenticatingSdkHttpClient client(OrganizationAuthenticationProvider provider, boolean retry) {
-    return new AuthenticatingSdkHttpClient(
-        apache, provider, new GatewayEndpointMatcher(List.of(URI.create(gateway.baseUrl() + "/bedrock"))), retry);
+    return new AuthenticatingSdkHttpClient(apache, provider, retry);
   }
 
   private HttpExecuteRequest request(String url) {
@@ -146,16 +144,15 @@ class AuthenticatingSdkHttpClientTest {
   }
 
   @Test
-  void refusesNonGatewayTargetsWithoutFetchingCredentials() {
-    final OrganizationAuthenticationProvider provider = mock(OrganizationAuthenticationProvider.class);
+  void everyTargetGetsTheOrganizationHeaders() throws Exception {
+    // There is no allow list: whatever endpoint the element configured is the gateway.
+    final String otherPath = "/somewhere-else/model/m/converse";
+    gateway.on(otherPath, Response.json(200, "{}"));
 
-    assertThatThrownBy(() -> client(provider, true).prepareRequest(request("http://127.0.0.1:1/bedrock/model/m/converse")))
-        .isInstanceOf(OrganizationAuthenticationException.class)
-        .hasMessageContaining("not an approved organization gateway endpoint");
-    assertThatThrownBy(() -> client(provider, true).prepareRequest(request(gateway.baseUrl() + "/other/model/m/converse")))
-        .isInstanceOf(OrganizationAuthenticationException.class);
-    assertThat(gateway.requests()).isEmpty();
-    org.mockito.Mockito.verifyNoInteractions(provider);
+    assertThat(call(client(new RefreshingProvider(), true), request(gateway.baseUrl() + otherPath)))
+        .isEqualTo(200);
+
+    assertThat(gateway.requests(otherPath).getFirst().header("x-bam-token")).isEqualTo("token-1");
   }
 
   @Test
@@ -202,9 +199,7 @@ class AuthenticatingSdkHttpClientTest {
   @Test
   void closeClosesTheDelegate() {
     final SdkHttpClient delegate = mock(SdkHttpClient.class);
-    new AuthenticatingSdkHttpClient(
-            delegate, new RefreshingProvider(), new GatewayEndpointMatcher(List.of(URI.create("https://gw"))), true)
-        .close();
+    new AuthenticatingSdkHttpClient(delegate, new RefreshingProvider(), true).close();
     verify(delegate).close();
   }
 }

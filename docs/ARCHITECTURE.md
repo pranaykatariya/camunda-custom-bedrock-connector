@@ -95,14 +95,14 @@ flowchart TD
     router{"OrganizationGatewayChatModelFactory<br/>provider.type?"}
     std["ChatModelFactoryImpl<br/>identical to Camunda's default bean"]
     builder["OrganizationBedrockChatModelBuilder<br/>create()"]
-    endpoint{"Endpoint set,<br/>https and allow-listed?"}
-    rejected["OrganizationAuthenticationException<br/>ENDPOINT_NOT_PERMITTED"]
+    endpoint{"Endpoint set and<br/>a usable absolute URL?"}
+    rejected["OrganizationAuthenticationException<br/>ENDPOINT_NOT_CONFIGURED"]
     client["BedrockRuntimeClient<br/>region · endpointOverride · apiCallTimeout<br/>AnonymousCredentialsProvider + noAuth-only scheme<br/>httpClientBuilder = AuthenticatingSdkHttpClientBuilder"]
     model["BedrockChatModel<br/>modelId · timeout · inferenceConfig<br/>wrapped: OrganizationAuthenticatedChatModel<br/>→ CloseableChatModelDelegate"]
     chat{"OrganizationAuthenticatedChatModel.chat()<br/>credentials available?"}
     noCreds["Fail closed<br/>nothing is sent"]
     converse["BedrockChatModel.chat → BedrockRuntimeClient.converse<br/>LangChain4j retry · AWS SDK retry"]
-    attempt["AuthenticatingSdkHttpClient.prepareRequest()<br/>per attempt: allow-list check · set x-bam-token, Accept, Host<br/>strip SigV4 headers · 401 → invalidate + retry once"]
+    attempt["AuthenticatingSdkHttpClient.prepareRequest()<br/>per attempt: set x-bam-token, Accept, Host<br/>strip SigV4 headers · 401 → invalidate + retry once"]
     apache["Apache HTTP client"]
     gw["Organization Bedrock gateway"]
     bedrock[("AWS Bedrock")]
@@ -135,7 +135,7 @@ Camunda job (org.ai-gateway:aiagent:1 or org.ai-gateway:aiagent-job-worker:1)
  → ChatModelFactory#createChatModel     ◄── OrganizationGatewayChatModelFactory (bean override)
      ├─ not Bedrock → ChatModelFactoryImpl (identical to Camunda's default bean)
      └─ Bedrock     → OrganizationBedrockChatModelBuilder#create
-           endpoint check (set, https, allow-listed) ─ otherwise fail closed
+           endpoint check (set, absolute URL with a host) ─ otherwise fail closed
            BedrockRuntimeClient: region, endpointOverride, apiCallTimeout,
              AnonymousCredentialsProvider + NoAuthAuthScheme + noAuth-only resolver,
              httpClientBuilder(AuthenticatingSdkHttpClientBuilder(Apache builder as Camunda))
@@ -144,7 +144,7 @@ Camunda job (org.ai-gateway:aiagent:1 or org.ai-gateway:aiagent-job-worker:1)
  → OrganizationAuthenticatedChatModel#chat: credentials first (fail closed), then
    BedrockChatModel#chat (LangChain4j retry) → BedrockRuntimeClient#converse (SDK retry)
    → per attempt: AuthenticatingSdkHttpClient#prepareRequest
-        allow-list check, OrganizationAuthenticationProvider#getCredentials,
+        OrganizationAuthenticationProvider#getCredentials,
         set x-bam-token / Accept / Host, strip SigV4 headers, 401 → invalidate + retry once
    → Apache HTTP client → Organization Bedrock gateway → Bedrock
 ```
@@ -160,7 +160,7 @@ flowchart LR
     enabled{"organization.ai-gateway.auth.enabled<br/>and framework = langchain4j?"}
     stock["No bean from this project<br/>runtime = stock Camunda connector"]
     ours["OrganizationAuthAutoConfiguration<br/>@AutoConfiguration(before = AgenticAiConnectorsAutoConfiguration)"]
-    beans["Registers<br/>GatewayEndpointMatcher<br/>OrganizationAuthenticationProvider<br/>ChatModelFactory = OrganizationGatewayChatModelFactory"]
+    beans["Registers<br/>OrganizationAuthenticationProvider<br/>ChatModelFactory = OrganizationGatewayChatModelFactory"]
     camunda["AgenticAiConnectorsAutoConfiguration<br/>→ AgenticAiLangchain4JFrameworkConfiguration"]
     backoff["langchain4JChatModelFactory<br/>@ConditionalOnMissingBean → backs off"]
 
@@ -190,7 +190,7 @@ Layering (arrows point from a package to the packages it depends on):
 flowchart TB
     config["<b>config</b> · Spring wiring<br/>OrganizationAuthAutoConfiguration<br/>OrganizationAuthProperties"]
     camunda["<b>camunda</b> · the only package that touches Camunda types<br/>OrganizationGatewayChatModelFactory<br/>OrganizationBedrockChatModelBuilder<br/>OrganizationAuthenticatedChatModel<br/>CamundaBedrockClientParity"]
-    transport["<b>transport</b> · decorates an AWS SDK SdkHttpClient<br/>AuthenticatingSdkHttpClient<br/>AuthenticatingSdkHttpClientBuilder<br/>GatewayEndpointMatcher"]
+    transport["<b>transport</b> · decorates an AWS SDK SdkHttpClient<br/>AuthenticatingSdkHttpClient<br/>AuthenticatingSdkHttpClientBuilder"]
     auth["<b>auth</b> · produces GatewayCredentials<br/>no Camunda, LangChain4j or HTTP types<br/>OrganizationAuthenticationProvider<br/>CachingTokenAuthenticationProvider<br/>StaticHeadersAuthenticationProvider<br/>AccessTokenSource<br/>PlaceholderJwtTokenSource<br/>oauth2.ClientCredentialsTokenClient"]
 
     config --> camunda
@@ -219,12 +219,13 @@ flowchart TB
    sends the same element configuration through Camunda's own factory and through ours, and
    compares URI and body byte for byte. Region, endpoint, API call timeout (element value and
    default fallback) and parameter mapping are asserted separately.
-3. **Every Bedrock call is organization-authenticated or fails.** A missing, non-https or
-   non-allow-listed endpoint, a failing token source, or a gateway 401/403 fails the job with a
-   sanitized `OrganizationAuthenticationException`. There is no fallback to AWS endpoints or to
-   Camunda's built-in Bedrock authentication.
-4. **Credentials only reach the gateway.** The allow-list is checked when the model is created
-   and again on every HTTP attempt.
+3. **Every Bedrock call is organization-authenticated or fails.** A missing or unusable endpoint,
+   a failing token source, or a gateway 401/403 fails the job with a sanitized
+   `OrganizationAuthenticationException`. There is no fallback to AWS endpoints or to Camunda's
+   built-in Bedrock authentication.
+4. **The endpoint is whatever the element says.** There is no allow-list: organization credentials
+   go to the URL configured on the element, so deploy rights on organization AI Agent elements are
+   what limits where they can be sent.
 5. **Off switch = stock Camunda.** With `organization.ai-gateway.auth.enabled=false` no bean from
    this project exists (`StandardBehaviourRegressionIT`).
 6. **Error semantics preserved.** The adapter wraps model-call exceptions into
@@ -254,7 +255,7 @@ sequenceDiagram
     Note over A: bind inputs, resolve tools,<br/>load memory, compose prompts
     A->>F: createChatModel(providerConfiguration)
     F->>B: create(bedrock)
-    B->>B: endpoint set, https, allow-listed?<br/>(otherwise fail closed)
+    B->>B: endpoint set and a usable URL?<br/>(otherwise fail closed)
     B-->>A: CloseableChatModelDelegate
     A->>M: chat(request)
     M->>P: getCredentials()
@@ -266,7 +267,6 @@ sequenceDiagram
     end
     Note over M,H: LangChain4j builds the Converse request,<br/>the AWS SDK runs its attempt loop
     M->>H: prepareRequest() for each SDK attempt
-    H->>H: request URI on the allow-list?
     H->>P: getCredentials()
     P-->>H: x-bam-token · Accept · Host
     H->>G: POST .../model/MODEL_ID/converse (unsigned)

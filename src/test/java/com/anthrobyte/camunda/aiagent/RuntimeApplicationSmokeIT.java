@@ -31,7 +31,6 @@ import org.springframework.context.ApplicationContext;
       "camunda.client.rest-address=http://127.0.0.1:1",
       "camunda.connector.polling.enabled=false",
       "camunda.connector.webhook.enabled=false",
-      "ORG_AI_GATEWAY_URL=https://bedrock-gateway.example.com/bedrock",
       "ORG_AI_GATEWAY_HOST_HEADER=bedrock-gateway.internal.example"
     })
 class RuntimeApplicationSmokeIT {

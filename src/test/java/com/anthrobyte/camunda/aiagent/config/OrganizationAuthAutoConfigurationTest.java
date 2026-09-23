@@ -24,11 +24,8 @@ class OrganizationAuthAutoConfigurationTest {
 
   private static final String P = "organization.ai-gateway.auth.";
   private static final String SECRET = "super-secret-client-secret";
-  private static final String GATEWAY = P + "allowed-endpoints=https://bedrock-gateway.example.com/bedrock";
-
   private static final String[] OAUTH2 = {
     P + "enabled=true",
-    P + "allowed-endpoints=https://bedrock-gateway.example.com/bedrock,https://backup-gw.example.com/bedrock",
     P + "mode=OAUTH2_CLIENT_CREDENTIALS",
     P + "oauth2.token-uri=https://idp.example.com/oauth2/token",
     P + "oauth2.client-id=camunda",
@@ -38,7 +35,7 @@ class OrganizationAuthAutoConfigurationTest {
   @Test
   void placeholderJwtIsTheDefaultModeAndSendsTheBamTokenHeader() {
     contextRunner()
-        .withPropertyValues(P + "enabled=true", GATEWAY)
+        .withPropertyValues(P + "enabled=true")
         .run(
             ctx -> {
               assertThat(ctx).hasNotFailed();
@@ -64,10 +61,6 @@ class OrganizationAuthAutoConfigurationTest {
               assertThat(ctx.getBean(OrganizationAuthenticationProvider.class))
                   .isInstanceOf(CachingTokenAuthenticationProvider.class);
               final var props = ctx.getBean(OrganizationAuthProperties.class);
-              assertThat(props.allowedEndpoints())
-                  .containsExactly(
-                      URI.create("https://bedrock-gateway.example.com/bedrock"),
-                      URI.create("https://backup-gw.example.com/bedrock"));
               assertThat(props.toString()).doesNotContain(SECRET);
               assertThat(props.token().headerName()).isEqualTo("x-bam-token");
               assertThat(props.token().headerValueTemplate()).isEqualTo("{token}");
@@ -80,7 +73,6 @@ class OrganizationAuthAutoConfigurationTest {
         .withPropertyValues(
             P + "enabled=true",
             P + "mode=STATIC_HEADERS",
-            GATEWAY,
             P + "static-headers[0].name=X-Client-ID",
             P + "static-headers[0].value=id",
             P + "static-headers[1].name=X-Client-Secret",
@@ -110,7 +102,6 @@ class OrganizationAuthAutoConfigurationTest {
         .withPropertyValues(
             P + "enabled=true",
             P + "mode=CUSTOM",
-            GATEWAY,
             P + "static-headers[0].name=Accept",
             P + "static-headers[0].value=application/json")
         .run(
@@ -135,7 +126,7 @@ class OrganizationAuthAutoConfigurationTest {
   void customProviderBeanReplacesBuiltInOne() {
     contextRunner()
         .withUserConfiguration(CustomProviderConfig.class)
-        .withPropertyValues(P + "enabled=true", P + "mode=CUSTOM", GATEWAY)
+        .withPropertyValues(P + "enabled=true", P + "mode=CUSTOM")
         .run(
             ctx -> {
               assertThat(ctx).hasNotFailed();
@@ -148,7 +139,7 @@ class OrganizationAuthAutoConfigurationTest {
   @Test
   void customModeWithoutBeanFailsFast() {
     contextRunner()
-        .withPropertyValues(P + "enabled=true", P + "mode=CUSTOM", GATEWAY)
+        .withPropertyValues(P + "enabled=true", P + "mode=CUSTOM")
         .run(
             ctx ->
                 assertThat(rootMessage(ctx.getStartupFailure()))
@@ -161,7 +152,6 @@ class OrganizationAuthAutoConfigurationTest {
         .withPropertyValues(
             P + "enabled=true",
             P + "mode=OAUTH2_CLIENT_CREDENTIALS",
-            P + "allowed-endpoints=http://plain-http-gateway.example.com",
             P + "oauth2.token-uri=https://user:" + SECRET + "@idp.example.com/token",
             P + "oauth2.client-id=",
             P + "oauth2.client-secret=",
@@ -173,7 +163,6 @@ class OrganizationAuthAutoConfigurationTest {
               assertThat(ctx).hasFailed();
               final String message = rootMessage(ctx.getStartupFailure());
               assertThat(message)
-                  .contains("allowed-endpoints[0] must use https")
                   .contains("oauth2.token-uri must not contain user-info")
                   .contains("oauth2.client-id is required (set ORG_AI_CLIENT_ID)")
                   .contains("oauth2.client-secret is required (set ORG_AI_CLIENT_SECRET)")
@@ -182,16 +171,6 @@ class OrganizationAuthAutoConfigurationTest {
                   .doesNotContain(SECRET)
                   .doesNotContain("gateway.example.com/path");
             });
-  }
-
-  @Test
-  void missingGatewayUrlFailsFastNamingTheEnvironmentVariable() {
-    contextRunner()
-        .withPropertyValues(P + "enabled=true")
-        .run(
-            ctx ->
-                assertThat(rootMessage(ctx.getStartupFailure()))
-                    .contains("allowed-endpoints must contain at least one Bedrock gateway base URL (set ORG_AI_GATEWAY_URL)"));
   }
 
   static class OtherFrameworkConfig {
@@ -222,7 +201,6 @@ class OrganizationAuthAutoConfigurationTest {
     final var props =
         new OrganizationAuthProperties(
             true,
-            List.of(URI.create("https://gw")),
             OrganizationAuthProperties.Mode.STATIC_HEADERS,
             true,
             false,

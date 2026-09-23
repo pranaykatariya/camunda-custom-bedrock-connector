@@ -22,7 +22,8 @@ export CAMUNDA_CLIENT_MODE=saas
 export CAMUNDA_CLIENT_CLOUD_CLUSTERID=...  CAMUNDA_CLIENT_CLOUD_REGION=...
 export CAMUNDA_CLIENT_AUTH_CLIENTID=...    CAMUNDA_CLIENT_AUTH_CLIENTSECRET=...
 
-export ORG_AI_GATEWAY_URL=https://bedrock-gateway.example.com/bedrock
+# The gateway URL itself is not a runtime variable: each AI Agent element carries it as its
+# "Custom endpoint" and the runtime uses that URL as it is.
 export ORG_AI_GATEWAY_HOST_HEADER=bedrock-gateway.internal.example
 # default mode PLACEHOLDER_JWT; for OAuth2 instead:
 # export ORG_AI_GATEWAY_AUTH_MODE=OAUTH2_CLIENT_CREDENTIALS ORG_AI_TOKEN_URL=… ORG_AI_CLIENT_ID=…
@@ -57,7 +58,7 @@ layout.
 
 ```mermaid
 flowchart LR
-    cm["ConfigMap<br/>CAMUNDA_CLIENT_MODE · cluster id · region<br/>job types · ORG_AI_GATEWAY_URL<br/>ORG_AI_GATEWAY_HOST_HEADER · auth mode"]
+    cm["ConfigMap<br/>CAMUNDA_CLIENT_MODE · cluster id · region<br/>job types<br/>ORG_AI_GATEWAY_HOST_HEADER · auth mode"]
     secret["Secret<br/>CAMUNDA_CLIENT_AUTH_CLIENTID / SECRET<br/>ORG_AI_CLIENT_ID / SECRET"]
 
     subgraph deployment["Deployment · replicas: 2"]
@@ -194,14 +195,15 @@ Regenerate after changing job types or upgrading Camunda:
 
 ```bash
 python3 scripts/generate-element-templates.py \
-  --gateway-url https://bedrock-gateway.example.com/bedrock   # optional default endpoint
+  --gateway-url https://bedrock-gateway.example.com/bedrock   # optional default endpoint in the template
 ```
 
 Publish the two JSON files to your Web Modeler organization (*Create new → Upload files*) or copy
 them into Desktop Modeler's `resources/element-templates`. In the element, set:
 
 * **Region**: the AWS region of the model, e.g. `eu-central-1`
-* **Organization Bedrock gateway endpoint**: a URL under `ORG_AI_GATEWAY_URL`
+* **Organization Bedrock gateway endpoint**: the gateway URL. The runtime sends the organization
+  credentials to exactly this URL, so it is the one place where the gateway is configured
 * **Model**: the Bedrock model id, e.g. `anthropic.claude-3-5-sonnet-20240620-v1:0`
 * optionally max tokens, temperature, top P and timeout
 

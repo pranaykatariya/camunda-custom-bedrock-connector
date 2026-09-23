@@ -21,11 +21,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * @param enabled master switch. When {@code false}, nothing from this project is active and the
  *     runtime behaves exactly like the standard Camunda AI Agent connector.
- * @param allowedEndpoints base URLs of the organization Bedrock gateway. Every Bedrock AI Agent
- *     must use one of them as its custom endpoint; organization credentials are sent nowhere else.
  * @param mode how credentials are obtained
  * @param retryOnUnauthorized retry a gateway call once with refreshed credentials after HTTP 401
- * @param allowInsecureHttp permit plain-http gateway or token URLs (local development only)
+ * @param allowInsecureHttp permit a plain-http token URL (local development only)
  * @param staticHeaders fixed headers sent to the gateway on every request, for example {@code
  *     Accept} and {@code Host}. In {@code STATIC_HEADERS} mode they are the credentials.
  * @param token how a token is put on the request and cached (token modes only)
@@ -35,7 +33,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = OrganizationAuthProperties.PREFIX)
 public record OrganizationAuthProperties(
     @DefaultValue("false") boolean enabled,
-    List<URI> allowedEndpoints,
     @DefaultValue("PLACEHOLDER_JWT") Mode mode,
     @DefaultValue("true") boolean retryOnUnauthorized,
     @DefaultValue("false") boolean allowInsecureHttp,
@@ -65,7 +62,6 @@ public record OrganizationAuthProperties(
   }
 
   public OrganizationAuthProperties {
-    allowedEndpoints = allowedEndpoints == null ? List.of() : List.copyOf(allowedEndpoints);
     staticHeaders = staticHeaders == null ? List.of() : List.copyOf(staticHeaders);
   }
 
@@ -146,16 +142,6 @@ public record OrganizationAuthProperties(
    */
   public void validate() {
     final List<String> problems = new ArrayList<>();
-
-    if (allowedEndpoints.isEmpty()) {
-      problems.add(
-          PREFIX
-              + ".allowed-endpoints must contain at least one Bedrock gateway base URL"
-              + " (set ORG_AI_GATEWAY_URL)");
-    }
-    for (int i = 0; i < allowedEndpoints.size(); i++) {
-      checkUrl(allowedEndpoints.get(i), PREFIX + ".allowed-endpoints[" + i + "]", problems);
-    }
 
     for (int i = 0; i < staticHeaders.size(); i++) {
       final Header header = staticHeaders.get(i);

@@ -20,7 +20,6 @@ import com.anthrobyte.camunda.aiagent.support.BedrockResponses;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.Response;
 import com.anthrobyte.camunda.aiagent.support.OpenAiResponses;
-import com.anthrobyte.camunda.aiagent.transport.GatewayEndpointMatcher;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import io.camunda.connector.agenticai.aiagent.framework.langchain4j.ChatModelFactory;
@@ -63,8 +62,6 @@ class OrganizationGatewayChatModelFactoryTest {
             agenticAiProperties(),
             agenticAiHttpProxySupport(),
             organizationAuth,
-            new GatewayEndpointMatcher(List.of(URI.create(server.baseUrl() + "/bedrock"))),
-            true,
             true));
   }
 
@@ -97,13 +94,24 @@ class OrganizationGatewayChatModelFactoryTest {
   }
 
   @Test
-  void bedrockOutsideTheGatewayIsRejectedNotPassedThrough() {
+  void bedrockWithoutAUsableEndpointIsRejectedNotPassedThrough() {
     final ChatModelFactory standard = mock(ChatModelFactory.class);
 
     assertThatThrownBy(() -> router(standard).createChatModel(bedrock(null)))
         .isInstanceOf(OrganizationAuthenticationException.class);
-    assertThatThrownBy(() -> router(standard).createChatModel(bedrock("https://bedrock-runtime.eu-central-1.amazonaws.com")))
-        .isInstanceOf(OrganizationAuthenticationException.class);
+    verifyNoInteractions(standard);
+  }
+
+  @Test
+  void bedrockOnAnyOtherHostStillGetsOrganizationAuthentication() {
+    // No allow list: an endpoint that is not the gateway is still built by the organization
+    // builder, never handed to Camunda's factory.
+    final ChatModelFactory standard = mock(ChatModelFactory.class);
+
+    try (var model =
+        router(standard).createChatModel(bedrock("https://bedrock-runtime.eu-central-1.amazonaws.com"))) {
+      assertThat(model).isNotNull();
+    }
     verifyNoInteractions(standard);
   }
 

@@ -81,7 +81,6 @@ class LoggingIT {
         .withPropertyValues(
             "organization.ai-gateway.auth.enabled=true",
             "organization.ai-gateway.auth.allow-insecure-http=true",
-            "organization.ai-gateway.auth.allowed-endpoints=" + gateway.baseUrl() + "/bedrock",
             "organization.ai-gateway.auth.mode=OAUTH2_CLIENT_CREDENTIALS",
             "organization.ai-gateway.auth.oauth2.token-uri=" + idp.baseUrl() + TOKEN_PATH,
             "organization.ai-gateway.auth.oauth2.client-id=" + CLIENT_ID,
@@ -175,13 +174,13 @@ class LoggingIT {
   }
 
   @Test
-  void rejectedEndpointIsLogged(CapturedOutput output) {
-    runAgent("https://bedrock-runtime.eu-central-1.amazonaws.com");
+  void unusableEndpointIsLogged(CapturedOutput output) {
+    // Any absolute URL is accepted; only one the SDK cannot use as an endpoint is rejected.
+    runAgent("bedrock-gateway.example.com");
 
     assertThat(output.getAll())
-        .contains("Rejecting Bedrock endpoint that is not an approved organization gateway")
-        .contains("Endpoint rejected by organization gateway allow list")
-        .contains("host differs");
+        .contains("Rejecting Bedrock endpoint: no usable organization gateway URL on the element")
+        .contains("custom endpoint is not an absolute url with a host");
     assertThat(gateway.requests()).isEmpty();
     assertNoSecrets(output);
   }

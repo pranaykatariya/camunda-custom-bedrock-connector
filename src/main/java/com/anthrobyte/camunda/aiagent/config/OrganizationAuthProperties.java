@@ -1,12 +1,10 @@
 package com.anthrobyte.camunda.aiagent.config;
 
-import com.anthrobyte.camunda.aiagent.auth.oauth2.ClientCredentialsSettings.ClientAuthentication;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.regex.Pattern;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -19,47 +17,31 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * variables / Kubernetes Secrets (see {@code application.yml}); {@link #toString()} and every
  * nested {@code toString()} redact them.
  *
+ * <p>The token is requested from the BAM token endpoint ({@code BamTokenClient}) and cached.
+ *
  * @param enabled master switch. When {@code false}, nothing from this project is active and the
  *     runtime behaves exactly like the standard Camunda AI Agent connector.
- * @param mode how credentials are obtained
  * @param retryOnUnauthorized retry a gateway call once with refreshed credentials after HTTP 401
- * @param allowInsecureHttp permit a plain-http token URL (local development only)
- * @param staticHeaders fixed headers sent to the gateway on every request, for example {@code
- *     Accept} and {@code Host}. In {@code STATIC_HEADERS} mode they are the credentials.
- * @param token how a token is put on the request and cached (token modes only)
- * @param placeholderJwt settings of the {@code PLACEHOLDER_JWT} mode
- * @param oauth2 OAuth 2.0 client-credentials settings
+ * @param staticHeaders fixed headers sent to the gateway on every request next to the token, for
+ *     example {@code Accept} and {@code Host}
+ * @param allowInsecureHttp permit a plain-http BAM token URL (local development only)
+ * @param token how a token is put on the request and cached
+ * @param bam the BAM token endpoint and its credentials
  */
 @ConfigurationProperties(prefix = OrganizationAuthProperties.PREFIX)
 public record OrganizationAuthProperties(
     @DefaultValue("false") boolean enabled,
-    @DefaultValue("PLACEHOLDER_JWT") Mode mode,
     @DefaultValue("true") boolean retryOnUnauthorized,
-    @DefaultValue("false") boolean allowInsecureHttp,
     List<Header> staticHeaders,
+    @DefaultValue("false") boolean allowInsecureHttp,
     @DefaultValue Token token,
-    @DefaultValue PlaceholderJwt placeholderJwt,
-    @DefaultValue OAuth2 oauth2) {
+    @DefaultValue Bam bam) {
 
   public static final String PREFIX = "organization.ai-gateway.auth";
 
   private static final Pattern HEADER_NAME = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
   private static final Pattern HOST_HEADER_VALUE =
       Pattern.compile("[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\\d{1,5})?");
-
-  public enum Mode {
-    /** A random, unsigned JWT: a stand-in until the organization token generation exists. */
-    PLACEHOLDER_JWT,
-    /** OAuth 2.0 client-credentials grant, with cached and refreshed access tokens. */
-    OAUTH2_CLIENT_CREDENTIALS,
-    /** Fixed headers from {@code static-headers}. */
-    STATIC_HEADERS,
-    /**
-     * An {@code AccessTokenSource} bean (cached like the built-in token modes) or an {@code
-     * OrganizationAuthenticationProvider} bean supplied by the application.
-     */
-    CUSTOM
-  }
 
   public OrganizationAuthProperties {
     staticHeaders = staticHeaders == null ? List.of() : List.copyOf(staticHeaders);
@@ -85,40 +67,27 @@ public record OrganizationAuthProperties(
       @DefaultValue("PT60S") Duration refreshSkew,
       @DefaultValue("PT15S") Duration refreshWaitTimeout) {}
 
-  /** @param lifetime expiry written into each placeholder JWT */
-  public record PlaceholderJwt(@DefaultValue("PT5M") Duration lifetime) {}
-
-  public record OAuth2(
-      URI tokenUri,
-      String clientId,
-      String clientSecret,
-      String scope,
-      String audience,
-      @DefaultValue("CLIENT_SECRET_BASIC") ClientAuthentication clientAuthentication,
-      Map<String, String> additionalParameters,
+  /**
+   * @param tokenUrl BAM token endpoint ({@code GET}, HTTP Basic authentication)
+   * @param username Basic authentication user name (secret)
+   * @param password Basic authentication password (secret)
+   * @param connectTimeout TCP connect timeout for the token endpoint
+   * @param requestTimeout overall timeout for one token request
+   * @param defaultTokenLifetime assumed when a token carries no usable {@code iat}/{@code exp}
+   */
+  public record Bam(
+      URI tokenUrl,
+      String username,
+      String password,
       @DefaultValue("PT5S") Duration connectTimeout,
       @DefaultValue("PT10S") Duration requestTimeout,
-      @DefaultValue("PT5M") Duration defaultTokenLifetime) {
-
-    public OAuth2 {
-      additionalParameters = additionalParameters == null ? Map.of() : Map.copyOf(additionalParameters);
-    }
+      @DefaultValue("PT10M") Duration defaultTokenLifetime) {
 
     @Override
     public String toString() {
-      return "OAuth2{tokenUri="
-          + tokenUri
-          + ", clientId="
-          + clientId
-          + ", clientSecret=[REDACTED], scope="
-          + scope
-          + ", audience="
-          + audience
-          + ", clientAuthentication="
-          + clientAuthentication
-          + ", additionalParameters="
-          + additionalParameters.keySet()
-          + ", connectTimeout="
+      return "Bam{tokenUrl="
+          + tokenUrl
+          + ", username=[REDACTED], password=[REDACTED], connectTimeout="
           + connectTimeout
           + ", requestTimeout="
           + requestTimeout
@@ -128,15 +97,9 @@ public record OrganizationAuthProperties(
     }
   }
 
-  /** Whether the mode puts a cached token on the request (all modes but STATIC_HEADERS). */
-  public boolean usesToken() {
-    return mode != Mode.STATIC_HEADERS;
-  }
-
   /**
-   * Validates the configuration for the selected mode. Problems are reported by property
-   * <i>name</i> (and the environment variable {@code application.yml} maps to it), never with
-   * their values.
+   * Validates the configuration. Problems are reported by property <i>name</i> (and the
+   * environment variable {@code application.yml} maps to it), never with their values.
    *
    * @throws IllegalStateException listing every problem found
    */
@@ -158,21 +121,8 @@ public record OrganizationAuthProperties(
       }
     }
 
-    if (usesToken()) {
-      validateToken(problems);
-    }
-    switch (mode) {
-      case PLACEHOLDER_JWT -> requirePositive(placeholderJwt.lifetime(), PREFIX + ".placeholder-jwt.lifetime", problems);
-      case OAUTH2_CLIENT_CREDENTIALS -> validateOAuth2(problems);
-      case STATIC_HEADERS -> {
-        if (staticHeaders.isEmpty()) {
-          problems.add(PREFIX + ".static-headers must not be empty in STATIC_HEADERS mode");
-        }
-      }
-      case CUSTOM -> {
-        // validated by the auto-configuration: a custom bean must exist
-      }
-    }
+    validateToken(problems);
+    validateBam(problems);
 
     if (!problems.isEmpty()) {
       throw new IllegalStateException(
@@ -195,48 +145,42 @@ public record OrganizationAuthProperties(
     requirePositive(token.refreshWaitTimeout(), p + ".refresh-wait-timeout", problems);
   }
 
-  private void validateOAuth2(List<String> problems) {
-    final String p = PREFIX + ".oauth2";
-    if (oauth2.tokenUri() == null) {
-      problems.add(p + ".token-uri is required (set ORG_AI_TOKEN_URL)");
+  private void validateBam(List<String> problems) {
+    final String p = PREFIX + ".bam";
+    final URI url = bam.tokenUrl();
+    if (url == null) {
+      problems.add(p + ".token-url is required (set ORG_AI_BAM_TOKEN_URL)");
+    } else if (!url.isAbsolute() || url.getHost() == null) {
+      problems.add(p + ".token-url must be an absolute URL (check ORG_AI_BAM_TOKEN_URL)");
     } else {
-      checkUrl(oauth2.tokenUri(), p + ".token-uri", problems);
+      final String scheme = url.getScheme().toLowerCase(Locale.ROOT);
+      if (scheme.equals("http") && !allowInsecureHttp) {
+        problems.add(
+            p + ".token-url must use https (set " + PREFIX + ".allow-insecure-http=true for local development only)");
+      } else if (!scheme.equals("https") && !scheme.equals("http")) {
+        problems.add(p + ".token-url must be an http(s) URL");
+      }
+      if (url.getRawUserInfo() != null) {
+        problems.add(p + ".token-url must not contain user-info (credentials in URLs are not allowed)");
+      }
     }
-    if (isBlank(oauth2.clientId())) {
-      problems.add(p + ".client-id is required (set ORG_AI_CLIENT_ID)");
+    if (bam.username() == null || bam.username().isBlank()) {
+      problems.add(p + ".username is required (set ORG_AI_BAM_USERNAME)");
+    } else if (bam.username().contains(":")) {
+      // RFC 7617: the Basic user-id cannot contain a colon.
+      problems.add(p + ".username must not contain ':' (check ORG_AI_BAM_USERNAME)");
     }
-    if (isBlank(oauth2.clientSecret())) {
-      problems.add(p + ".client-secret is required (set ORG_AI_CLIENT_SECRET)");
+    if (bam.password() == null || bam.password().isEmpty()) {
+      problems.add(p + ".password is required (set ORG_AI_BAM_PASSWORD)");
     }
-    requirePositive(oauth2.connectTimeout(), p + ".connect-timeout", problems);
-    requirePositive(oauth2.requestTimeout(), p + ".request-timeout", problems);
-    requirePositive(oauth2.defaultTokenLifetime(), p + ".default-token-lifetime", problems);
-  }
-
-  private void checkUrl(URI uri, String property, List<String> problems) {
-    if (uri == null || !uri.isAbsolute() || uri.getHost() == null) {
-      problems.add(property + " must be an absolute URL");
-      return;
-    }
-    final String scheme = uri.getScheme().toLowerCase(Locale.ROOT);
-    if (scheme.equals("http") && !allowInsecureHttp) {
-      problems.add(
-          property + " must use https (set " + PREFIX + ".allow-insecure-http=true for local development only)");
-    } else if (!scheme.equals("https") && !scheme.equals("http")) {
-      problems.add(property + " must be an http(s) URL");
-    }
-    if (uri.getRawUserInfo() != null) {
-      problems.add(property + " must not contain user-info (credentials in URLs are not allowed)");
-    }
+    requirePositive(bam.connectTimeout(), p + ".connect-timeout", problems);
+    requirePositive(bam.requestTimeout(), p + ".request-timeout", problems);
+    requirePositive(bam.defaultTokenLifetime(), p + ".default-token-lifetime", problems);
   }
 
   private static void requirePositive(Duration duration, String property, List<String> problems) {
     if (duration == null || duration.isNegative() || duration.isZero()) {
       problems.add(property + " must be a positive duration");
     }
-  }
-
-  private static boolean isBlank(String value) {
-    return value == null || value.isBlank();
   }
 }

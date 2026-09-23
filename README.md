@@ -1,26 +1,26 @@
-# Organization AI Agent Connector Runtime
+# Organization AI Agent Connector Extension
 
-A Camunda 8.9 connector runtime that runs the **standard, unmodified Camunda AI Agent connector**
-(Task and Sub-process) and changes one thing: **how the AWS Bedrock provider authenticates.**
-Every Bedrock AI Agent served by this runtime calls the organization Bedrock gateway with
-organization headers (`x-bam-token: <token>`, plus configurable `Accept` and `Host`) instead of
-AWS SigV4.
+An extension jar for the Camunda 8.9 connector runtime. The runtime keeps running the **standard,
+unmodified Camunda AI Agent connector** (Task and Sub-process); this jar changes one thing:
+**how the AWS Bedrock provider authenticates.** Every Bedrock AI Agent call goes to the
+organization Bedrock gateway with organization headers (`x-bam-token: <token>`, plus configurable
+`Accept` and `Host`) instead of AWS SigV4.
 
 * Agent orchestration, tools, MCP, memory, prompts, tool calling, the Bedrock Converse protocol and
   element semantics are Camunda's and LangChain4j's code, untouched.
 * All other providers (Anthropic, Azure OpenAI, Vertex AI, OpenAI, OpenAI-compatible) behave
   exactly like the standard connector.
-* Credentials are managed by the runtime and are never stored in BPMN or process variables. The
-  token comes from a pluggable `AccessTokenSource`. Until the organization's token generation
-  exists, a **placeholder** random, unsigned JWT is sent.
-* Built on `io.camunda.connector:spring-boot-starter-camunda-connectors` and
-  `io.camunda.connector:connector-agentic-ai` **8.9.12**. All other versions come from Camunda's
-  own BOM.
+* The token is a **BAM token** fetched from the BAM token endpoint with HTTP Basic auth, and
+  cached. The endpoint URL, username and password are secrets supplied through the environment;
+  nothing is stored in BPMN or process variables.
+* Built against `io.camunda.connector:connector-agentic-ai` **8.9.12** (scope `provided`). All
+  other versions come from Camunda's own BOM.
 
-## How it hooks in (short version)
+## How it hooks in
 
-Camunda registers `ChatModelFactory` as `@ConditionalOnMissingBean`. This project provides that
-bean as a small router:
+Camunda registers `ChatModelFactory` as `@ConditionalOnMissingBean`.
+`OrganizationAuthAutoConfiguration` runs before Camunda's auto-configuration and provides that bean
+as a small router:
 
 ```
 AI Agent (Camunda) → Langchain4JAiFrameworkAdapter (Camunda)
@@ -32,75 +32,154 @@ AI Agent (Camunda) → Langchain4JAiFrameworkAdapter (Camunda)
       └─ any other   → ChatModelFactoryImpl (Camunda), unchanged
 ```
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+With `organization.ai-gateway.auth.enabled=false` nothing from this jar is active and the runtime
+is exactly the standard connector.
 
-## Quick start
+## Build and deploy
 
 ```bash
-./mvnw verify                                   # 113 tests, no external services needed
-
-export CAMUNDA_CLIENT_MODE=saas CAMUNDA_CLIENT_CLOUD_CLUSTERID=… CAMUNDA_CLIENT_CLOUD_REGION=…
-export CAMUNDA_CLIENT_AUTH_CLIENTID=… CAMUNDA_CLIENT_AUTH_CLIENTSECRET=…
-export ORG_AI_GATEWAY_HOST_HEADER=bedrock-gateway.internal.example   # placeholder until known
-java -jar target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT-exec.jar
+./mvnw verify    # all unit + integration tests, no external services needed
+./mvnw package   # target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT.jar (thin: only this project's classes)
 ```
 
-Then upload `element-templates/*.json` to Modeler, use **AI Agent Task / Sub-process
-(Organization Bedrock Gateway)**, set the region, the gateway endpoint and the model, and deploy.
-The gateway URL lives on the element ("Custom endpoint"): the runtime uses whatever is configured
-there, with no allow-list.
+Put the jar on the Camunda connector runtime's classpath (exactly one copy of it) and provide the
+three `ORG_AI_BAM_*` secrets. Startup validates the configuration and fails fast, listing the
+offending *property names* and environment variables (never their values).
+
+## Configuration
+
+`application.yml` (packaged in the jar) maps the settings under `organization.ai-gateway.auth.*` to
+environment variables. Secrets must come from the environment, never from `application.yml` or BPMN.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ORG_AI_BAM_TOKEN_URL` (**secret**) | – (required) | BAM token endpoint, `https://…/api/token`. |
+| `ORG_AI_BAM_USERNAME` (**secret**) | – (required) | Basic auth user name (must not contain `:`). |
+| `ORG_AI_BAM_PASSWORD` (**secret**) | – (required) | Basic auth password. |
+| `ORG_AI_GATEWAY_AUTH_ENABLED` | `true` (yml) / `false` (code) | Master switch. `false` = exactly the standard connector. |
+| `ORG_AI_GATEWAY_HOST_HEADER` | `bedrock-gateway.placeholder.invalid` (**placeholder**, warned at startup) | `Host` header the gateway routes on: `host[:port]`, not a URL. |
+| `ORG_AI_GATEWAY_TOKEN_HEADER` | `x-bam-token` | Header that carries the token. |
+| `ORG_AI_GATEWAY_TOKEN_HEADER_TEMPLATE` | `{token}` | Header value; `{token}` is replaced (e.g. `Bearer {token}`). |
+| `ORG_AI_AGENT_TASK_TYPE` → `CONNECTOR_AI_AGENT_TYPE` | `org.ai-gateway:aiagent:1` | Job type of the AI Agent **Task**. |
+| `ORG_AI_AGENT_SUBPROCESS_TYPE` → `CONNECTOR_AI_AGENT_JOB_WORKER_TYPE` | `org.ai-gateway:aiagent-job-worker:1` | Job type of the AI Agent **Sub-process**. |
+
+Further properties (no env mapping): `retry-on-unauthorized` (`true`: after a gateway 401, fetch a
+fresh token and resend once), `token.refresh-skew` (`PT60S`, capped at half the token lifetime),
+`token.refresh-wait-timeout` (`PT15S`), `bam.connect-timeout` / `bam.request-timeout` (`PT5S` /
+`PT10S`), `bam.default-token-lifetime` (`PT10M`, only for a token without `iat`/`exp`),
+`allow-insecure-http` (`false`: the BAM URL must be https; local development only), and
+`static-headers[n]` (default `Accept: application/json` and the `Host` above). `application.yml` also switches off the other agentic connectors (MCP remote
+client, A2A, ad-hoc tools schema) so this runtime never competes for the standard
+`io.camunda.agenticai:*` job types.
+
+**The gateway URL is not configured here.** Each Bedrock AI Agent element carries it as its
+"Custom endpoint" and the runtime uses it exactly as configured: no allow-list, no scheme check.
+Only a missing endpoint, or one that is not an absolute URL with a host, fails the job
+(`ENDPOINT_NOT_CONFIGURED`).
+
+### The BAM token and its caching
+
+`BamTokenClient` calls `GET <ORG_AI_BAM_TOKEN_URL>` with `Authorization: Basic base64(user:password)`
+and reads `bamToken` from the JSON response. The token is valid for 10 minutes;
+`BamTokenCache` manages it:
+
+* **Lazy, then cached per pod.** The first Bedrock call fetches a token; every call after that reuses
+  it (a lock-free read), so BAM is called about once per 9 minutes per pod, not once per request.
+* **Refreshed before it expires.** A token counts as expired `refresh-skew` (60 s) early, so it is
+  replaced after ~9 minutes and a request never leaves with a token about to expire in flight.
+* **Expiry from the token itself.** The lifetime is `exp - iat` from the JWT claims, applied to the
+  pod's clock, so clock skew between the pod and BAM does not matter.
+* **Single-flight.** When the token expires under load, one request fetches the new token and the
+  others wait for it (at most `refresh-wait-timeout`), so there is no burst of BAM calls. If that
+  fetch fails, the waiting requests get the same failure instead of each retrying.
+* **401 from the gateway.** The rejected token is dropped, a fresh one is fetched and the request is
+  resent once; a second 401 fails the job.
+* **BAM failures fail closed.** Nothing is sent to the gateway without a token. A 401/403 from BAM
+  (wrong credentials) is permanent; timeouts, connection errors, 408/429/5xx are transient, so
+  Camunda's normal job retries try again later.
+
+### What goes on the wire
+
+```
+POST https://<gateway>/<base>/model/<model id, URL-encoded>/converse
+x-bam-token: <token>
+Accept: application/json
+Host: <ORG_AI_GATEWAY_HOST_HEADER>
+Content-Type: application/json
+(no Authorization, X-Amz-Date, X-Amz-Security-Token or X-Amz-Content-Sha256)
+```
+
+The gateway and BAM clients honour Camunda's proxy variables (`CONNECTOR_HTTP(S)_PROXY_*`,
+`CONNECTOR_HTTP_NON_PROXY_HOSTS`) and use the JVM default truststore. The BAM client never follows
+redirects, so the credentials only ever reach the configured host.
+
+## BPMN / Modeler
+
+The only change a BPMN element needs is its **task definition type**.
+
+* **Organization templates (recommended):** `element-templates/*.json` are generated from Camunda's
+  official 8.9.12 templates by `scripts/generate-element-templates.py`. They set the custom job
+  type, fix the provider to Bedrock with `defaultCredentialsChain` (no AWS key fields) and make the
+  custom endpoint required. Regenerate after changing job types or upgrading Camunda:
+  `python3 scripts/generate-element-templates.py [--gateway-url https://…]`. In the element set the
+  region, the gateway endpoint and the model.
+* **Camunda's Hybrid AI Agent templates:** enter the custom task definition type, choose *AWS
+  Bedrock* with *Default Credentials Chain*, and set the custom endpoint to the gateway URL.
+
+Never put AWS keys, API keys, client secrets or tokens in BPMN. Do not set
+`CAMUNDA_CONNECTOR_RUNTIME_SAAS` on this runtime, or Camunda rejects `defaultCredentialsChain`.
+
+## Security and logging
+
+* Every Bedrock config goes to the organization path; element AWS keys/API keys are ignored and the
+  client resolves only the no-auth scheme, so no SigV4 or bearer signer runs. AWS signing headers
+  are stripped.
+* Credentials are fetched before the model is called and on every attempt. If they cannot be
+  obtained, the job fails and nothing is sent. A final gateway 401/403 fails the job with a sanitized
+  `FAILED_MODEL_CALL` error. Exceptions carry fixed messages and no cause.
+* **The endpoint is not a control:** credentials go to whatever URL an element points at. Restrict
+  who can deploy processes with the organization templates and consider egress policies.
+* Logs contain header *names*, hosts, paths, status codes and durations, never tokens, header
+  values, element AWS keys or bodies (`LoggingIT` asserts this at TRACE). Key/value pairs are
+  appended to plain-text lines by the `logging.pattern.console` set in `application.yml` (Spring
+  Boot's own pattern plus `%kvp`; its default ends in `%m` and would drop them). This jar ships no
+  `logback-spring.xml`, so the runtime's own logging configuration applies unchanged.
+  Never enable DEBUG on `org.apache.http.headers`/`org.apache.http.wire`.
 
 ## Project layout
 
 ```
 src/main/java/com/anthrobyte/camunda/aiagent/
-  OrgAiAgentConnectorRuntimeApplication.java   Spring Boot main class
-  auth/        credential abstraction, no Camunda/HTTP dependencies
-    OrganizationAuthenticationProvider          headers for the next request (implement for custom schemes)
-    AccessTokenSource                           one new token (plug in the organization JWT here)
-    CachingTokenAuthenticationProvider          token cache, expiry skew, single-flight refresh, invalidation
-    PlaceholderJwtTokenSource                   random unsigned JWT (placeholder)
-    StaticHeadersAuthenticationProvider
-    GatewayCredentials, AccessToken             values redacted in toString
-    oauth2/ClientCredentialsTokenClient         RFC 6749 client-credentials request
+  auth/        BAM token: fetch, cache, headers; no Camunda/AWS dependencies
+    BamTokenClient, BamTokenSettings            GET the BAM token (Basic auth), expiry from iat/exp
+    BamTokenCache                               token cache, expiry skew, single-flight refresh, invalidation;
+                                                hands out the headers for each gateway request
+    GatewayCredentials, BamToken                values redacted in toString
     OrganizationAuthentication(Unavailable)Exception, AuthenticationFailureReason
-  transport/   AWS SDK HTTP client decorator, no Camunda dependencies
-    AuthenticatingSdkHttpClient(+Builder)       org headers per attempt, 401 retry-once, strips SigV4 headers
+  transport/   AuthenticatingSdkHttpClient(+Builder): org headers per attempt, 401 retry-once, strips SigV4 headers
   camunda/     the only Camunda integration points
     OrganizationGatewayChatModelFactory         overrides Camunda's ChatModelFactory bean (router)
     OrganizationBedrockChatModelBuilder         Bedrock client/model for the gateway
     CamundaBedrockClientParity                  everything copied from Camunda's Bedrock setup
     OrganizationAuthenticatedChatModel          fail closed before sending, sanitized auth errors
-  config/
-    OrganizationAuthAutoConfiguration           @AutoConfiguration(before = AgenticAiConnectorsAutoConfiguration)
-    OrganizationAuthProperties                  organization.ai-gateway.auth.*
+  config/      OrganizationAuthAutoConfiguration, OrganizationAuthProperties
 src/main/resources/application.yml              job types, disabled extra connectors, ORG_* mapping
-element-templates/                              generated from Camunda's official templates (Bedrock only)
-scripts/generate-element-templates.py           the generator
-deploy/kubernetes/                              example manifests
-Dockerfile
+element-templates/, scripts/                    Modeler templates and their generator
 ```
 
 ## Tests
 
 | Suite | What it proves |
 |---|---|
-| `OrganizationBedrockChatModelBuilderTest` | real AWS SDK + LangChain4j against a fake gateway: `x-bam-token`/`Accept`/`Host` sent, **no** `AWS4-HMAC-SHA256`/`X-Amz-*`, element AWS keys and API key ignored, URL-encoded model id, token cached and refreshed after expiry, 401 → invalidate + exactly one retry, persistent 401/403 sanitized, token failures fail closed with **no request sent**, endpoint missing or not a usable URL rejected while any other URL is used as configured, region/endpoint/`apiCallTimeout` and default fallback, `inferenceConfig` mapping, **request body identical to Camunda's own Bedrock factory**, closing the model closes the client |
-| `OrganizationGatewayChatModelFactoryTest` | every Bedrock config uses org auth (no fallback), OpenAI-compatible is no longer org-authenticated, other providers delegated untouched |
-| `AuthenticatingSdkHttpClientTest` | header replacement and SigV4 header removal, everything else unchanged, Host override, every target gets the org headers, 401 retry with the same body, no retry when disabled / not refreshable, close |
-| `CachingTokenAuthenticationProviderTest` | caching, expiry and skew, refresh, identity-based invalidation, 64-thread concurrent fetch/refresh = 1 token request, shared failure, bounded waiting, sanitized unexpected source errors, header order |
-| `PlaceholderJwtTokenSourceTest` | JWT shape, expiry, randomness, startup warning, token never logged |
-| `ClientCredentialsTokenClientTest` | OAuth2 success (Basic and POST), permanent vs transient failures, malformed responses, timeouts, no secrets echoed or logged |
-| `OrganizationBedrockAiAgentIT` | real Camunda auto-configuration + `AiAgentFunction` with Bedrock: tool-calling round trip, token caching, transparent refresh on 401, sanitized `FAILED_MODEL_CALL`, IdP outage and an unusable endpoint fail closed, LLM errors unchanged |
-| `StandardBehaviourRegressionIT` | disabled = Camunda's own beans; enabled = OpenAI-compatible byte-identical to the standard connector; Task and Sub-process share the overridden factory |
-| `OrganizationAuthAutoConfigurationTest` | all modes, custom `AccessTokenSource` / provider beans, exactly one `ChatModelFactory`, fail-fast validation naming env vars without leaking values |
-| `LoggingIT` | whole AI Agent flow at TRACE: expected log lines appear; no token, client secret or element AWS key is ever logged |
-| `RuntimeApplicationSmokeIT` | the real application + `application.yml`: bean replaced, `x-bam-token` + `Accept` + `Host` defaults, custom job types |
+| `OrganizationBedrockChatModelBuilderTest` | real AWS SDK + LangChain4j against a fake gateway: org headers sent, **no** SigV4/`X-Amz-*`, element AWS keys ignored, token caching and refresh, 401 → invalidate + one retry, 401/403 sanitized, token failures send nothing, unusable endpoints rejected, timeouts, **request body identical to Camunda's own Bedrock factory** |
+| `OrganizationGatewayChatModelFactoryTest` | every Bedrock config uses org auth, other providers delegated untouched |
+| `AuthenticatingSdkHttpClientTest` | header replacement, SigV4 header removal, Host override, 401 retry with the same body |
+| `BamTokenCacheTest` | caching, skew, identity-based invalidation, 64-thread single-flight refresh, shared failure, bounded waiting |
+| `OrganizationBedrockAiAgentIT` | real Camunda auto-configuration + `AiAgentFunction`: tool-calling round trip, refresh on 401, sanitized `FAILED_MODEL_CALL`, BAM outage and unusable endpoint fail closed, LLM errors unchanged |
+| `StandardBehaviourRegressionIT` | disabled = Camunda's own beans; enabled = OpenAI-compatible byte-identical to the standard connector |
+| `BamTokenClientTest` | Basic auth GET, expiry from `exp - iat` (clock-skew safe) with fallbacks, 401 permanent vs 408/429/5xx/timeout/unreachable transient, malformed responses, redirects not followed, credentials and tokens never logged |
+| `OrganizationAuthAutoConfigurationTest` | BAM token fetched lazily, cached and sent in `x-bam-token`, missing secrets fail startup naming the env vars, https-only BAM URL, legacy `mode` setting ignored, exactly one `ChatModelFactory`, fail-fast validation without leaking values |
+| `LoggingIT` | whole AI Agent flow at TRACE: expected log lines appear, no BAM password, token or element AWS key ever logged |
+| `RuntimeApplicationSmokeIT` | a Spring Boot app with this jar and its `application.yml`, secrets via `ORG_AI_BAM_*`: bean replaced, BAM token + header defaults, custom job types |
 
-## Documentation
-
-* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): execution path, extension point, why it is safe, request walkthrough
-* [docs/CONFIGURATION.md](docs/CONFIGURATION.md): every property and environment variable, plugging in the real token
-* [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): build, Docker, Kubernetes, hybrid SaaS, **BPMN/Modeler changes**
-* [docs/UPGRADING.md](docs/UPGRADING.md): upgrade procedure and each Camunda assumption with its tripwire
-* [docs/SECURITY.md](docs/SECURITY.md): secret handling and threat/control/test matrix
+Upgrading Camunda: [docs/UPGRADING.md](docs/UPGRADING.md).

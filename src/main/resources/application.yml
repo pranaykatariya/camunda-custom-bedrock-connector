@@ -1,40 +1,9 @@
-# =================================================================================================
-# Organization AI Agent Connector Runtime
-#
-# Rules for this file:
-#   * NO secrets here. Every secret is a ${ENV_VAR} placeholder, resolved at runtime from the
-#     environment (Kubernetes Secret, Vault agent, etc.). See docs/CONFIGURATION.md.
-#   * Camunda cluster connection (SaaS or Self-Managed) is also supplied via environment variables
-#     (CAMUNDA_CLIENT_*), see README.md "Deployment".
-# =================================================================================================
-
-spring:
-  application:
-    name: org-ai-agent-connector-runtime
-
-# -------------------------------------------------------------------------------------------------
-# Job types: this runtime must NOT compete with the default (SaaS or Self-Managed) connector
-# runtime for the standard AI Agent job types. The names are derived by Camunda from the connector
-# names ("AI Agent" / "AI Agent Job Worker"), see ConnectorConfigurationOverrides.
-# Environment variables with the same name take precedence over these defaults.
-# -------------------------------------------------------------------------------------------------
-# AI Agent Task (service task, outbound connector "AI Agent")
 CONNECTOR_AI_AGENT_TYPE: ${ORG_AI_AGENT_TASK_TYPE:org.ai-gateway:aiagent:1}
-# AI Agent Sub-process (ad-hoc sub-process, job worker "AI Agent Job Worker")
 CONNECTOR_AI_AGENT_JOB_WORKER_TYPE: ${ORG_AI_AGENT_SUBPROCESS_TYPE:org.ai-gateway:aiagent-job-worker:1}
 
 camunda:
   connector:
     agenticai:
-      # Keep the AI Agent Task + Sub-process (the point of this runtime) ...
-      aiagent:
-        outbound-connector:
-          enabled: true
-        job-worker:
-          enabled: true
-      # ... and switch off the other agentic connectors bundled in connector-agentic-ai. Left on, they
-      # would poll the STANDARD job types (io.camunda.agenticai:mcpremoteclient:1, a2aclient, ...) and
-      # compete with the default runtime. Enable them only if you also give them custom types.
       ad-hoc-tools-schema-resolver:
         enabled: false
       mcp:
@@ -52,59 +21,25 @@ camunda:
             tool:
               enabled: false
 
-# -------------------------------------------------------------------------------------------------
-# Organization authentication for the AI Agent's AWS Bedrock provider (this project).
-# Every Bedrock AI Agent served by this runtime sends organization headers (no AWS SigV4) to the
-# organization Bedrock gateway. Other providers are untouched. See docs/CONFIGURATION.md.
-# -------------------------------------------------------------------------------------------------
 organization:
   ai-gateway:
     auth:
-      # false = runtime behaves exactly like the standard Camunda AI Agent connector.
       enabled: ${ORG_AI_GATEWAY_AUTH_ENABLED:true}
-
-      # The gateway URL is NOT configured here. Every Bedrock AI Agent element supplies its own
-      # "Custom endpoint" and the runtime uses it as it is: no allow list, no scheme restriction.
-      # Organization credentials are therefore sent to whatever URL an element points at.
-
-      # PLACEHOLDER_JWT | OAUTH2_CLIENT_CREDENTIALS | STATIC_HEADERS | CUSTOM
-      # PLACEHOLDER_JWT sends a random unsigned JWT until the real token generation is plugged in
-      # (AccessTokenSource bean + CUSTOM).
-      mode: ${ORG_AI_GATEWAY_AUTH_MODE:PLACEHOLDER_JWT}
-
-      retry-on-unauthorized: true
-
-      # Header that carries the token: x-bam-token: <token>
       token:
         header-name: ${ORG_AI_GATEWAY_TOKEN_HEADER:x-bam-token}
         header-value-template: "${ORG_AI_GATEWAY_TOKEN_HEADER_TEMPLATE:{token}}"
-        refresh-skew: PT60S
-        refresh-wait-timeout: PT15S
-
-      placeholder-jwt:
-        lifetime: PT5M
-
-      # Sent with every Bedrock gateway request, next to the token header.
       static-headers:
         - name: Accept
           value: application/json
-        # host[:port] the gateway routes on. PLACEHOLDER value: set ORG_AI_GATEWAY_HOST_HEADER.
+        # Placeholder: set ORG_AI_GATEWAY_HOST_HEADER to the host the gateway routes on.
         - name: Host
           value: ${ORG_AI_GATEWAY_HOST_HEADER:bedrock-gateway.placeholder.invalid}
-
-      # OAUTH2_CLIENT_CREDENTIALS mode only
-      oauth2:
-        token-uri: ${ORG_AI_TOKEN_URL:}
-        client-id: ${ORG_AI_CLIENT_ID:}
-        client-secret: ${ORG_AI_CLIENT_SECRET:}
-        scope: ${ORG_AI_TOKEN_SCOPE:}
-        audience: ${ORG_AI_TOKEN_AUDIENCE:}
-        client-authentication: ${ORG_AI_TOKEN_CLIENT_AUTH:CLIENT_SECRET_BASIC}
-        connect-timeout: PT5S
-        request-timeout: PT10S
-        default-token-lifetime: PT5M
+      bam:
+        token-url: ${ORG_AI_BAM_TOKEN_URL:}
+        username: ${ORG_AI_BAM_USERNAME:}
+        password: ${ORG_AI_BAM_PASSWORD:}
 
 logging:
-  level:
-    com.anthrobyte.camunda.aiagent: INFO
-    # Never set DEBUG on org.apache.http.headers / org.apache.http.wire in production: it logs header values.
+  pattern:
+    # Spring Boot's default pattern ends in %m; %kvp is what emits this project's structured log fields.
+    console: "%clr(%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}){faint} %clr(%5p){} %clr(${PID:- }){magenta} %clr(--- [%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m %kvp%n%wEx"

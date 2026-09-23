@@ -10,13 +10,14 @@ import static com.anthrobyte.camunda.aiagent.support.CamundaFixtures.standardCha
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-import com.anthrobyte.camunda.aiagent.auth.AccessToken;
-import com.anthrobyte.camunda.aiagent.auth.AccessTokenSource;
 import com.anthrobyte.camunda.aiagent.auth.AuthenticationFailureReason;
-import com.anthrobyte.camunda.aiagent.auth.CachingTokenAuthenticationProvider;
+import com.anthrobyte.camunda.aiagent.auth.BamToken;
+import com.anthrobyte.camunda.aiagent.auth.BamTokenCache;
+import com.anthrobyte.camunda.aiagent.auth.BamTokenClient;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationException;
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationUnavailableException;
 import com.anthrobyte.camunda.aiagent.support.BedrockResponses;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
@@ -39,6 +40,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -61,9 +63,9 @@ class OrganizationBedrockChatModelBuilderTest {
   private final AtomicInteger issuedTokens = new AtomicInteger();
   private final ObjectMapper json = new ObjectMapper();
 
-  /** Organization token source stub: jwt-1, jwt-2, ... each valid for 5 minutes. */
-  private final AccessTokenSource tokenSource =
-      () -> new AccessToken("jwt-" + issuedTokens.incrementAndGet(), clock.instant().plus(Duration.ofMinutes(5)));
+  /** BAM stub: jwt-1, jwt-2, ... each valid for 5 minutes. */
+  private final Supplier<BamToken> tokenSource =
+      () -> new BamToken("jwt-" + issuedTokens.incrementAndGet(), clock.instant().plus(Duration.ofMinutes(5)));
 
   @AfterEach
   void tearDown() {
@@ -74,16 +76,18 @@ class OrganizationBedrockChatModelBuilderTest {
     return gateway.baseUrl() + BASE_PATH;
   }
 
-  private CachingTokenAuthenticationProvider provider(AccessTokenSource source) {
+  private BamTokenCache provider(Supplier<BamToken> source) {
+    final BamTokenClient bam = mock(BamTokenClient.class);
+    when(bam.requestToken()).thenAnswer(invocation -> source.get());
     final Map<String, String> staticHeaders = new LinkedHashMap<>();
     staticHeaders.put("Accept", "application/json");
     staticHeaders.put("Host", HOST_HEADER);
-    return new CachingTokenAuthenticationProvider(
-        source, "x-bam-token", "{token}", staticHeaders, Duration.ofSeconds(60), Duration.ofSeconds(5), clock, null);
+    return new BamTokenCache(
+        bam, "x-bam-token", "{token}", staticHeaders, Duration.ofSeconds(60), Duration.ofSeconds(5), clock);
   }
 
   private OrganizationBedrockChatModelBuilder builder(
-      OrganizationAuthenticationProvider provider, boolean retryOnUnauthorized) {
+      BamTokenCache provider, boolean retryOnUnauthorized) {
     return new OrganizationBedrockChatModelBuilder(
         agenticAiProperties(), agenticAiHttpProxySupport(), provider, retryOnUnauthorized);
   }
@@ -251,7 +255,7 @@ class OrganizationBedrockChatModelBuilderTest {
   @Test
   void rejectedTokenRequestFailsClosedWithoutCallingTheGateway() {
     answerOk();
-    final AccessTokenSource rejecting =
+    final Supplier<BamToken> rejecting =
         () -> {
           throw new OrganizationAuthenticationException(
               AuthenticationFailureReason.TOKEN_REQUEST_REJECTED, 401, "invalid_client");
@@ -270,7 +274,7 @@ class OrganizationBedrockChatModelBuilderTest {
   @Test
   void unavailableTokenEndpointFailsClosedWithoutCallingTheGateway() {
     answerOk();
-    final AccessTokenSource unavailable =
+    final Supplier<BamToken> unavailable =
         () -> {
           throw new OrganizationAuthenticationUnavailableException(
               AuthenticationFailureReason.TOKEN_ENDPOINT_UNREACHABLE);
@@ -287,7 +291,7 @@ class OrganizationBedrockChatModelBuilderTest {
   @Test
   void unexpectedTokenSourceErrorIsSanitizedAndFailsClosed() {
     answerOk();
-    final AccessTokenSource buggy =
+    final Supplier<BamToken> buggy =
         () -> {
           throw new IllegalStateException("signing key sk-live-123 not found");
         };

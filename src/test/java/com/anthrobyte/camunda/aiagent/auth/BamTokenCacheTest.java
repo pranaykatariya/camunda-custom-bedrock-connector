@@ -25,10 +25,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 @Timeout(30)
-class CachingTokenAuthenticationProviderTest {
+class BamTokenCacheTest {
 
   private final MutableClock clock = MutableClock.startingNow();
-  private final AccessTokenSource tokenClient = mock(AccessTokenSource.class);
+  private final BamTokenClient tokenClient = mock(BamTokenClient.class);
   private final ExecutorService pool = Executors.newFixedThreadPool(64);
 
   @AfterEach
@@ -36,24 +36,23 @@ class CachingTokenAuthenticationProviderTest {
     pool.shutdownNow();
   }
 
-  private CachingTokenAuthenticationProvider provider(Duration refreshWaitTimeout) {
-    return new CachingTokenAuthenticationProvider(
+  private BamTokenCache cache(Duration refreshWaitTimeout) {
+    return new BamTokenCache(
         tokenClient,
         "Authorization",
         "Bearer {token}",
         Map.of("X-Client-ID", "camunda-ai-agent"),
         Duration.ofSeconds(60),
         refreshWaitTimeout,
-        clock,
-        null);
+        clock);
   }
 
-  private CachingTokenAuthenticationProvider provider() {
-    return provider(Duration.ofSeconds(10));
+  private BamTokenCache cache() {
+    return cache(Duration.ofSeconds(10));
   }
 
-  private AccessToken token(String value, Duration lifetime) {
-    return new AccessToken(value, clock.instant().plus(lifetime));
+  private BamToken token(String value, Duration lifetime) {
+    return new BamToken(value, clock.instant().plus(lifetime));
   }
 
   /** Token client stub that counts calls and returns tokens tok-1, tok-2, ... */
@@ -97,7 +96,7 @@ class CachingTokenAuthenticationProviderTest {
   void buildsHeadersFromTokenAndAdditionalHeaders() {
     countingTokens(Duration.ofHours(1), Duration.ZERO);
 
-    final GatewayCredentials credentials = provider().getCredentials();
+    final GatewayCredentials credentials = cache().getCredentials();
 
     assertThat(credentials.headers())
         .containsEntry("Authorization", "Bearer tok-1")
@@ -108,11 +107,11 @@ class CachingTokenAuthenticationProviderTest {
   @Test
   void cachesTokenUntilExpiry() {
     final var calls = countingTokens(Duration.ofHours(1), Duration.ZERO);
-    final var provider = provider();
+    final var cache = cache();
 
-    final var first = provider.getCredentials();
+    final var first = cache.getCredentials();
     for (int i = 0; i < 100; i++) {
-      assertThat(provider.getCredentials()).isSameAs(first);
+      assertThat(cache.getCredentials()).isSameAs(first);
     }
     assertThat(calls).hasValue(1);
   }
@@ -120,16 +119,16 @@ class CachingTokenAuthenticationProviderTest {
   @Test
   void refreshesExpiredTokenRespectingRefreshSkew() {
     final var calls = countingTokens(Duration.ofMinutes(10), Duration.ZERO);
-    final var provider = provider();
-    assertThat(provider.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-1");
+    final var cache = cache();
+    assertThat(cache.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-1");
 
     // still valid 1s before (expiry - skew)
     clock.advance(Duration.ofMinutes(9).minusSeconds(1));
-    assertThat(provider.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-1");
+    assertThat(cache.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-1");
 
     // at (expiry - 60s skew) the token is treated as expired and refreshed
     clock.advance(Duration.ofSeconds(1));
-    assertThat(provider.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-2");
+    assertThat(cache.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-2");
     assertThat(calls).hasValue(2);
   }
 
@@ -137,15 +136,15 @@ class CachingTokenAuthenticationProviderTest {
   void skewIsCappedForShortLivedTokens() {
     // 30s token with 60s skew must not be "expired on arrival" (skew capped to 15s)
     final var calls = countingTokens(Duration.ofSeconds(30), Duration.ZERO);
-    final var provider = provider();
+    final var cache = cache();
 
-    provider.getCredentials();
+    cache.getCredentials();
     clock.advance(Duration.ofSeconds(14));
-    provider.getCredentials();
+    cache.getCredentials();
     assertThat(calls).hasValue(1);
 
     clock.advance(Duration.ofSeconds(1));
-    provider.getCredentials();
+    cache.getCredentials();
     assertThat(calls).hasValue(2);
   }
 
@@ -154,41 +153,41 @@ class CachingTokenAuthenticationProviderTest {
   @Test
   void invalidateCurrentCredentialsForcesRefresh() {
     final var calls = countingTokens(Duration.ofHours(1), Duration.ZERO);
-    final var provider = provider();
+    final var cache = cache();
 
-    final var rejected = provider.getCredentials();
-    provider.invalidate(rejected);
+    final var rejected = cache.getCredentials();
+    cache.invalidate(rejected);
 
-    assertThat(provider.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-2");
+    assertThat(cache.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-2");
     assertThat(calls).hasValue(2);
   }
 
   @Test
   void invalidatingStaleCredentialsDoesNotDiscardNewerToken() {
     final var calls = countingTokens(Duration.ofHours(1), Duration.ZERO);
-    final var provider = provider();
+    final var cache = cache();
 
-    final var stale = provider.getCredentials();
-    provider.invalidate(stale);
-    final var fresh = provider.getCredentials();
+    final var stale = cache.getCredentials();
+    cache.invalidate(stale);
+    final var fresh = cache.getCredentials();
 
-    provider.invalidate(stale); // a late 401 for the old token
-    assertThat(provider.getCredentials()).isSameAs(fresh);
+    cache.invalidate(stale); // a late 401 for the old token
+    assertThat(cache.getCredentials()).isSameAs(fresh);
     assertThat(calls).hasValue(2);
   }
 
   @Test
   void concurrentInvalidationsOfSameTokenCauseSingleRefresh() throws Exception {
     final var calls = countingTokens(Duration.ofHours(1), Duration.ofMillis(100));
-    final var provider = provider();
-    final var rejected = provider.getCredentials();
+    final var cache = cache();
+    final var rejected = cache.getCredentials();
 
     final var results =
         runConcurrently(
             32,
             () -> {
-              provider.invalidate(rejected);
-              return provider.getCredentials();
+              cache.invalidate(rejected);
+              return cache.getCredentials();
             });
 
     assertThat(results).allSatisfy(c -> assertThat(c).isNotSameAs(rejected));
@@ -201,9 +200,9 @@ class CachingTokenAuthenticationProviderTest {
   @Test
   void concurrentInitialRequestsShareOneTokenRequest() throws Exception {
     final var calls = countingTokens(Duration.ofHours(1), Duration.ofMillis(300));
-    final var provider = provider();
+    final var cache = cache();
 
-    final var results = runConcurrently(64, provider::getCredentials);
+    final var results = runConcurrently(64, cache::getCredentials);
 
     assertThat(calls).hasValue(1);
     assertThat(results).allSatisfy(c -> assertThat(c).isSameAs(results.getFirst()));
@@ -212,11 +211,11 @@ class CachingTokenAuthenticationProviderTest {
   @Test
   void concurrentRefreshAfterExpiryIsSingleFlight() throws Exception {
     final var calls = countingTokens(Duration.ofMinutes(5), Duration.ofMillis(300));
-    final var provider = provider();
-    provider.getCredentials();
+    final var cache = cache();
+    cache.getCredentials();
 
     clock.advance(Duration.ofMinutes(5));
-    final var results = runConcurrently(64, provider::getCredentials);
+    final var results = runConcurrently(64, cache::getCredentials);
 
     assertThat(calls).hasValue(2);
     assertThat(results)
@@ -237,14 +236,14 @@ class CachingTokenAuthenticationProviderTest {
               }
               return token("tok-ok", Duration.ofHours(1));
             });
-    final var provider = provider();
+    final var cache = cache();
 
-    assertThatThrownBy(provider::getCredentials)
+    assertThatThrownBy(cache::getCredentials)
         .isInstanceOf(OrganizationAuthenticationException.class)
         .hasMessageContaining("invalid_client");
 
     // the next (later) call tries again
-    assertThat(provider.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-ok");
+    assertThat(cache.getCredentials().headers()).containsEntry("Authorization", "Bearer tok-ok");
   }
 
   @Test
@@ -258,14 +257,14 @@ class CachingTokenAuthenticationProviderTest {
               throw new OrganizationAuthenticationUnavailableException(
                   AuthenticationFailureReason.TOKEN_ENDPOINT_ERROR, 503, null);
             });
-    final var provider = provider();
+    final var cache = cache();
 
     final var outcomes =
         runConcurrently(
             32,
             () -> {
               try {
-                provider.getCredentials();
+                cache.getCredentials();
                 return "success";
               } catch (OrganizationAuthenticationUnavailableException e) {
                 return e.reason().name();
@@ -288,12 +287,12 @@ class CachingTokenAuthenticationProviderTest {
               release.await();
               return token("tok", Duration.ofHours(1));
             });
-    final var provider = provider(Duration.ofMillis(200));
+    final var cache = cache(Duration.ofMillis(200));
 
-    final Future<GatewayCredentials> slow = pool.submit(provider::getCredentials);
+    final Future<GatewayCredentials> slow = pool.submit(cache::getCredentials);
     assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
 
-    assertThatThrownBy(provider::getCredentials)
+    assertThatThrownBy(cache::getCredentials)
         .isInstanceOf(OrganizationAuthenticationUnavailableException.class)
         .extracting(e -> ((OrganizationAuthenticationUnavailableException) e).reason())
         .isEqualTo(AuthenticationFailureReason.TOKEN_ENDPOINT_TIMEOUT);
@@ -311,14 +310,14 @@ class CachingTokenAuthenticationProviderTest {
               throw new OrganizationAuthenticationException(
                   AuthenticationFailureReason.TOKEN_REQUEST_REJECTED, 401, "invalid_client");
             });
-    final var provider = provider();
+    final var cache = cache();
 
     final List<Throwable> errors =
         runConcurrently(
             8,
             () -> {
               try {
-                provider.getCredentials();
+                cache.getCredentials();
                 return null;
               } catch (RuntimeException e) {
                 return (Throwable) e;
@@ -331,10 +330,10 @@ class CachingTokenAuthenticationProviderTest {
   }
 
   @Test
-  void unexpectedSourceExceptionBecomesSanitizedPermanentFailure() {
+  void unexpectedClientExceptionBecomesSanitizedPermanentFailure() {
     when(tokenClient.requestToken()).thenThrow(new IllegalStateException("key material sk-123 missing"));
 
-    assertThatThrownBy(provider()::getCredentials)
+    assertThatThrownBy(cache()::getCredentials)
         .isInstanceOf(OrganizationAuthenticationException.class)
         .hasMessage("Organization Bedrock gateway authentication failed: the organization token source failed.")
         .hasNoCause()
@@ -346,7 +345,7 @@ class CachingTokenAuthenticationProviderTest {
   void nullTokenIsAFailureNotAnUnauthenticatedRequest() {
     when(tokenClient.requestToken()).thenReturn(null);
 
-    assertThatThrownBy(provider()::getCredentials)
+    assertThatThrownBy(cache()::getCredentials)
         .isInstanceOf(OrganizationAuthenticationException.class)
         .hasMessageContaining("no token returned");
   }
@@ -357,36 +356,30 @@ class CachingTokenAuthenticationProviderTest {
     final var ordered = new java.util.LinkedHashMap<String, String>();
     ordered.put("Accept", "application/json");
     ordered.put("Host", "gw.internal");
-    final var provider =
-        new CachingTokenAuthenticationProvider(
+    final var cache =
+        new BamTokenCache(
             tokenClient, "x-bam-token", "{token}", ordered, Duration.ofSeconds(60),
-            Duration.ofSeconds(1), clock, null);
+            Duration.ofSeconds(1), clock);
 
-    assertThat(provider.getCredentials().headers().keySet())
+    assertThat(cache.getCredentials().headers().keySet())
         .containsExactly("Accept", "Host", "x-bam-token");
-    assertThat(provider.getCredentials().headers()).containsEntry("x-bam-token", "tok-1");
+    assertThat(cache.getCredentials().headers()).containsEntry("x-bam-token", "tok-1");
   }
 
   @Test
-  void closeReleasesResources() throws Exception {
-    final AutoCloseable resource = mock(AutoCloseable.class);
-    final var provider =
-        new CachingTokenAuthenticationProvider(
-            tokenClient, "Authorization", "Bearer {token}", Map.of(), Duration.ZERO,
-            Duration.ofSeconds(1), clock, resource);
+  void closeClosesTheTokenClient() {
+    cache().close();
 
-    provider.close();
-
-    verify(resource, times(1)).close();
+    verify(tokenClient, times(1)).close();
   }
 
   @Test
   void rejectsTemplateWithoutPlaceholder() {
     assertThatThrownBy(
             () ->
-                new CachingTokenAuthenticationProvider(
+                new BamTokenCache(
                     tokenClient, "Authorization", "Bearer", Map.of(), Duration.ZERO,
-                    Duration.ofSeconds(1), clock, null))
+                    Duration.ofSeconds(1), clock))
         .isInstanceOf(IllegalArgumentException.class);
   }
 }

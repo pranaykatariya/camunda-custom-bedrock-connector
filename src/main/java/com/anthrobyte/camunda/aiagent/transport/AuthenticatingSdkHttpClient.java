@@ -1,7 +1,7 @@
 package com.anthrobyte.camunda.aiagent.transport;
 
+import com.anthrobyte.camunda.aiagent.auth.BamTokenCache;
 import com.anthrobyte.camunda.aiagent.auth.GatewayCredentials;
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -35,8 +35,8 @@ import software.amazon.awssdk.http.SdkHttpResponse;
  *       replaced, and AWS signing headers ({@code Authorization}, {@code X-Amz-Date}, {@code
  *       X-Amz-Security-Token}, {@code X-Amz-Content-Sha256}) are removed unless the organization
  *       itself sends one of them.
- *   <li><b>One retry on 401.</b> The rejected credentials are always invalidated. If the provider
- *       can refresh and retries are enabled, the request is sent once more with fresh ones. The
+ *   <li><b>One retry on 401.</b> The rejected credentials are always invalidated. If retries are
+ *       enabled, the request is sent once more with a fresh BAM token. The
  *       request body is re-read from the SDK's repeatable content provider.
  *   <li><b>Statuses unchanged.</b> Every response, including a final 401/403, is returned to the
  *       SDK as it is. The chat model turns 401/403 into a sanitized exception.
@@ -52,15 +52,15 @@ public final class AuthenticatingSdkHttpClient implements SdkHttpClient {
       Set.of("authorization", "x-amz-date", "x-amz-security-token", "x-amz-content-sha256");
 
   private final SdkHttpClient delegate;
-  private final OrganizationAuthenticationProvider authenticationProvider;
+  private final BamTokenCache tokenCache;
   private final boolean retryOnUnauthorized;
 
   public AuthenticatingSdkHttpClient(
       SdkHttpClient delegate,
-      OrganizationAuthenticationProvider authenticationProvider,
+      BamTokenCache tokenCache,
       boolean retryOnUnauthorized) {
     this.delegate = delegate;
-    this.authenticationProvider = authenticationProvider;
+    this.tokenCache = tokenCache;
     this.retryOnUnauthorized = retryOnUnauthorized;
   }
 
@@ -82,18 +82,17 @@ public final class AuthenticatingSdkHttpClient implements SdkHttpClient {
 
     @Override
     public HttpExecuteResponse call() throws IOException {
-      final GatewayCredentials credentials = authenticationProvider.getCredentials();
+      final GatewayCredentials credentials = tokenCache.getCredentials();
       HttpExecuteResponse response = send(credentials, 1);
       if (response.httpResponse().statusCode() != 401) {
         return response;
       }
 
-      authenticationProvider.invalidate(credentials);
-      if (!retryOnUnauthorized || !authenticationProvider.supportsRefresh() || aborted) {
+      tokenCache.invalidate(credentials);
+      if (!retryOnUnauthorized || aborted) {
         LOG.atDebug()
             .addKeyValue("gatewayHost", request.httpRequest().host())
             .addKeyValue("retryOnUnauthorized", retryOnUnauthorized)
-            .addKeyValue("providerSupportsRefresh", authenticationProvider.supportsRefresh())
             .log("Bedrock gateway returned HTTP 401; not retrying");
         return response;
       }
@@ -102,10 +101,10 @@ public final class AuthenticatingSdkHttpClient implements SdkHttpClient {
       LOG.atInfo()
           .addKeyValue("gatewayHost", request.httpRequest().host())
           .log("Bedrock gateway returned HTTP 401; refreshing organization credentials and retrying once");
-      final GatewayCredentials refreshed = authenticationProvider.getCredentials();
+      final GatewayCredentials refreshed = tokenCache.getCredentials();
       response = send(refreshed, 2);
       if (response.httpResponse().statusCode() == 401) {
-        authenticationProvider.invalidate(refreshed);
+        tokenCache.invalidate(refreshed);
         LOG.atWarn()
             .addKeyValue("gatewayHost", request.httpRequest().host())
             .log("Bedrock gateway rejected freshly obtained organization credentials with HTTP 401 again");

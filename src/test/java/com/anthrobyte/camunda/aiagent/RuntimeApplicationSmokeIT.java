@@ -1,10 +1,12 @@
 package com.anthrobyte.camunda.aiagent;
 
+import static com.anthrobyte.camunda.aiagent.support.BamResponses.TOKEN_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.anthrobyte.camunda.aiagent.auth.CachingTokenAuthenticationProvider;
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
+import com.anthrobyte.camunda.aiagent.auth.BamTokenCache;
 import com.anthrobyte.camunda.aiagent.camunda.OrganizationGatewayChatModelFactory;
+import com.anthrobyte.camunda.aiagent.support.BamResponses;
+import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import io.camunda.client.annotation.value.JobWorkerValue;
 import io.camunda.client.annotation.value.SourceAware.FromAnnotation;
 import io.camunda.connector.agenticai.aiagent.AiAgentJobWorker;
@@ -12,13 +14,18 @@ import io.camunda.connector.agenticai.aiagent.framework.langchain4j.ChatModelFac
 import io.camunda.connector.agenticai.aiagent.jobworker.AiAgentJobWorkerValueCustomizer;
 import io.camunda.connector.runtime.core.config.OutboundConnectorConfiguration;
 import io.camunda.connector.runtime.core.outbound.OutboundConnectorFactory;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * Boots the real application: {@code application.yml}, Camunda's
+ * Boots a Spring Boot application the way the Camunda connector runtime does, with this jar on its
+ * classpath: {@code application.yml}, Camunda's
  * spring-boot-starter-camunda-connectors, connector-agentic-ai and this project's
  * auto-configuration, ordered by Spring Boot itself.
  *
@@ -35,6 +42,27 @@ import org.springframework.context.ApplicationContext;
     })
 class RuntimeApplicationSmokeIT {
 
+  /** Stands in for the Camunda connector runtime's main class. */
+  @SpringBootApplication
+  static class ConnectorRuntime {}
+
+  private static final FakeHttpServer BAM = new FakeHttpServer().on(TOKEN_PATH, BamResponses.issuing());
+
+  /** The BAM secrets, supplied through the same environment placeholders as in production. */
+  @DynamicPropertySource
+  static void bamSecrets(DynamicPropertyRegistry registry) {
+    registry.add("ORG_AI_BAM_TOKEN_URL", () -> BAM.baseUrl() + TOKEN_PATH);
+    registry.add("ORG_AI_BAM_USERNAME", () -> BamResponses.USERNAME);
+    registry.add("ORG_AI_BAM_PASSWORD", () -> BamResponses.PASSWORD);
+    // the fake endpoint is plain http
+    registry.add("organization.ai-gateway.auth.allow-insecure-http", () -> "true");
+  }
+
+  @AfterAll
+  static void stopBam() {
+    BAM.close();
+  }
+
   @Autowired ApplicationContext context;
 
   @Test
@@ -42,13 +70,14 @@ class RuntimeApplicationSmokeIT {
     assertThat(context.getBeansOfType(ChatModelFactory.class)).hasSize(1);
     assertThat(context.getBean(ChatModelFactory.class))
         .isInstanceOf(OrganizationGatewayChatModelFactory.class);
-    // application.yml default mode: placeholder JWT in x-bam-token, plus Accept and Host
-    final var provider = context.getBean(OrganizationAuthenticationProvider.class);
-    assertThat(provider).isInstanceOf(CachingTokenAuthenticationProvider.class);
-    assertThat(provider.getCredentials().headers())
+    // application.yml defaults: the BAM token in x-bam-token, plus Accept and Host
+    final var cache = context.getBean(BamTokenCache.class);
+    assertThat(cache.getCredentials().headers())
         .containsEntry("Accept", "application/json")
         .containsEntry("Host", "bedrock-gateway.internal.example")
-        .containsKey("x-bam-token");
+        .containsEntry("x-bam-token", BamResponses.jwt(1));
+    assertThat(BAM.requests(TOKEN_PATH).getFirst().header("Authorization"))
+        .isEqualTo(BamResponses.basicAuthorization());
   }
 
   @Test

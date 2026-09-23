@@ -35,7 +35,7 @@ Colours: 🟦 Camunda / third-party, unchanged · 🟧 this project · 🟥 stop
 
 ```mermaid
 flowchart TD
-    bump["1 · Bump version.connectors in pom.xml<br/>align version.spring-boot (build plugin)"]
+    bump["1 · Bump version.connectors in pom.xml<br/>align version.spring-boot (annotation processor)"]
     javap["2 · javap the new ChatModelFactoryImpl<br/>and ChatModelHttpProxySupport"]
     diff{"Copied Bedrock setup<br/>changed upstream?"}
     port["Port the change into<br/>CamundaBedrockClientParity"]
@@ -63,7 +63,7 @@ flowchart TD
 ```bash
 # 1. bump the version
 sed -i '' 's|<version.connectors>.*<|<version.connectors>8.9.13<|' pom.xml   # example
-#    also align <version.spring-boot> with connector-parent's <version.spring-boot> (build plugin only)
+#    also align <version.spring-boot> with connector-parent's <version.spring-boot> (annotation processor only)
 
 # 2. re-check the code copied from Camunda (see "Copied from Camunda" below)
 J=~/.m2/repository/io/camunda/connector/connector-agentic-ai/<new>/connector-agentic-ai-<new>.jar
@@ -109,10 +109,10 @@ option), our copy will not apply it until it is ported.
 | 8 | Bedrock validation `isDefaultCredentialsChainUsedInSaaS` only checks `CAMUNDA_CONNECTOR_RUNTIME_SAAS` | templates fix `defaultCredentialsChain` | `OrganizationBedrockAiAgentIT` (binds a `defaultCredentialsChain` element) |
 | 9 | Worker type overrides `CONNECTOR_AI_AGENT_TYPE` / `CONNECTOR_AI_AGENT_JOB_WORKER_TYPE` | `application.yml` | `RuntimeApplicationSmokeIT` |
 | 10 | Official templates contain the task type, `provider.type` with `bedrock`, `provider.bedrock.authentication.type` with `defaultCredentialsChain`, `provider.bedrock.endpoint` | generator | the script exits with an error |
-| 11 | `spring-boot-starter-camunda-connectors` ships `logback-spring.xml` (shadowed here) | `logback-spring.xml` | review manually |
+| 11 | Spring Boot's default console pattern (this jar appends `%kvp` via `logging.pattern.console`) | `application.yml` | review manually |
 
 ## If Camunda adds native support
 
 If a future release lets you customise Bedrock authentication or the Bedrock HTTP client
-officially, prefer that and delete `…aiagent.camunda`. `auth` (including your `AccessTokenSource`)
+officially, prefer that and delete `…aiagent.camunda`. `auth`
 and `transport` are reusable as they are.

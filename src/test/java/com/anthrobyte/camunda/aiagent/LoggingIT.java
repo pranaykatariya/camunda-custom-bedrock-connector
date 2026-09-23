@@ -2,19 +2,18 @@ package com.anthrobyte.camunda.aiagent;
 
 import static com.anthrobyte.camunda.aiagent.support.AgenticAiTestInfrastructure.contextRunner;
 import static com.anthrobyte.camunda.aiagent.support.AgenticAiTestInfrastructure.outboundContext;
+import static com.anthrobyte.camunda.aiagent.support.BamResponses.TOKEN_PATH;
 import static com.anthrobyte.camunda.aiagent.support.CamundaFixtures.BEDROCK_MODEL;
 import static com.anthrobyte.camunda.aiagent.support.CamundaFixtures.BEDROCK_REGION;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import com.anthrobyte.camunda.aiagent.support.BamResponses;
 import com.anthrobyte.camunda.aiagent.support.BedrockResponses;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.Response;
-import com.anthrobyte.camunda.aiagent.support.TokenResponses;
 import io.camunda.connector.agenticai.aiagent.AiAgentFunction;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -32,13 +31,9 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 @ExtendWith(OutputCaptureExtension.class)
 class LoggingIT {
 
-  private static final String TOKEN_PATH = "/oauth2/token";
   private static final String CONVERSE = "/bedrock" + BedrockResponses.conversePath(BEDROCK_MODEL);
-  private static final String CLIENT_ID = "logging-client";
-  private static final String CLIENT_SECRET = "Log-Secret-Value-123";
-  private static final String TOKEN_PREFIX = "AccessTokenValue";
 
-  private final FakeHttpServer idp = new FakeHttpServer();
+  private final FakeHttpServer bam = new FakeHttpServer().on(TOKEN_PATH, BamResponses.issuing());
   private final FakeHttpServer gateway = new FakeHttpServer();
   private final Logger projectLogger =
       (Logger) LoggerFactory.getLogger("com.anthrobyte.camunda.aiagent");
@@ -48,13 +43,12 @@ class LoggingIT {
   void traceLogging() {
     previousLevel = projectLogger.getLevel();
     projectLogger.setLevel(Level.TRACE);
-    idp.on(TOKEN_PATH, (req, n) -> Response.json(200, TokenResponses.token(TOKEN_PREFIX + n, 3600)));
   }
 
   @AfterEach
   void tearDown() {
     projectLogger.setLevel(previousLevel);
-    idp.close();
+    bam.close();
     gateway.close();
   }
 
@@ -78,13 +72,8 @@ class LoggingIT {
 
   private void runAgent(String endpoint) {
     contextRunner()
-        .withPropertyValues(
-            "organization.ai-gateway.auth.enabled=true",
-            "organization.ai-gateway.auth.allow-insecure-http=true",
-            "organization.ai-gateway.auth.mode=OAUTH2_CLIENT_CREDENTIALS",
-            "organization.ai-gateway.auth.oauth2.token-uri=" + idp.baseUrl() + TOKEN_PATH,
-            "organization.ai-gateway.auth.oauth2.client-id=" + CLIENT_ID,
-            "organization.ai-gateway.auth.oauth2.client-secret=" + CLIENT_SECRET)
+        .withPropertyValues(BamResponses.properties(bam))
+        .withPropertyValues("organization.ai-gateway.auth.enabled=true")
         .run(
             ctx -> {
               try {
@@ -99,14 +88,11 @@ class LoggingIT {
     runAgent(gateway.baseUrl() + "/bedrock");
   }
 
+  /** No BAM credential or element AWS key appears in the log (the issued token is logged on purpose). */
   private static void assertNoSecrets(CapturedOutput output) {
-    final String basic =
-        Base64.getEncoder()
-            .encodeToString((CLIENT_ID + ":" + CLIENT_SECRET).getBytes(StandardCharsets.UTF_8));
     assertThat(output.getAll())
-        .doesNotContain(CLIENT_SECRET)
-        .doesNotContain(basic)
-        .doesNotContain(TOKEN_PREFIX)
+        .doesNotContain(BamResponses.PASSWORD)
+        .doesNotContain(BamResponses.basicAuthorization().substring("Basic ".length()))
         .doesNotContain("AKIA-Bpmn-Access-Key")
         .doesNotContain("Bpmn-Secret-Key-Value");
   }
@@ -122,7 +108,6 @@ class LoggingIT {
     assertThat(output.getAll())
         // startup
         .contains("Organization Bedrock gateway authentication enabled")
-        .contains("OAuth2 client-credentials organization authentication configured")
         .contains("Token-based organization authentication configured")
         .contains("Registering organization Bedrock ChatModelFactory")
         .contains("Camunda ChatModelFactory replaced by organization Bedrock gateway router")
@@ -131,8 +116,8 @@ class LoggingIT {
         .contains("AWS credentials are configured on the AI Agent element")
         .contains("Authenticating HTTP client for organization Bedrock gateway built")
         .contains("Organization authentication token refresh required")
-        .contains("Requesting organization authentication token")
-        .contains("Organization authentication token received")
+        .contains("Requesting BAM token")
+        .contains("BAM token received")
         .contains("Organization authentication token refreshed")
         .contains("Calling organization Bedrock gateway")
         .contains("Organization Bedrock gateway returned an error status")
@@ -148,14 +133,15 @@ class LoggingIT {
   }
 
   @Test
-  void identityProviderRejection(CapturedOutput output) {
-    idp.on(TOKEN_PATH, Response.json(401, "{\"error\":\"invalid_client\"}"));
+  void bamRejection(CapturedOutput output) {
+    bam.on(TOKEN_PATH, Response.json(401, "{\"error\":\"Invalid credentials\"}"));
 
     runAgent();
 
     assertThat(output.getAll())
-        .contains("Organization authentication token request failed")
-        .contains("Organization authentication token refresh failed");
+        .contains("BAM token request failed")
+        .contains("Organization authentication token refresh failed")
+        .contains("TOKEN_REQUEST_REJECTED");
     assertThat(gateway.requests()).isEmpty();
     assertNoSecrets(output);
   }

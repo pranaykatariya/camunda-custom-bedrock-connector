@@ -3,16 +3,17 @@ package com.anthrobyte.camunda.aiagent;
 import static com.anthrobyte.camunda.aiagent.support.AgenticAiTestInfrastructure.TOOLS_CONTAINER_ID;
 import static com.anthrobyte.camunda.aiagent.support.AgenticAiTestInfrastructure.contextRunner;
 import static com.anthrobyte.camunda.aiagent.support.AgenticAiTestInfrastructure.outboundContext;
+import static com.anthrobyte.camunda.aiagent.support.BamResponses.TOKEN_PATH;
 import static com.anthrobyte.camunda.aiagent.support.CamundaFixtures.BEDROCK_MODEL;
 import static com.anthrobyte.camunda.aiagent.support.CamundaFixtures.BEDROCK_REGION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.anthrobyte.camunda.aiagent.camunda.OrganizationGatewayChatModelFactory;
+import com.anthrobyte.camunda.aiagent.support.BamResponses;
 import com.anthrobyte.camunda.aiagent.support.BedrockResponses;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.Response;
-import com.anthrobyte.camunda.aiagent.support.TokenResponses;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.camunda.connector.agenticai.aiagent.AiAgentFunction;
@@ -38,36 +39,29 @@ import org.springframework.test.util.ReflectionTestUtils;
  * End-to-end: the <b>unmodified</b> Camunda AI Agent Task ({@link AiAgentFunction}, with its
  * agent initializer, tool resolution, memory, limits and response handling) running on this
  * runtime with the AWS Bedrock provider, calling a fake organization Bedrock gateway that requires
- * an {@code x-bam-token} obtained with OAuth2 client credentials.
+ * an {@code x-bam-token} obtained from a fake BAM token endpoint.
  */
 @ExtendWith(OutputCaptureExtension.class)
 class OrganizationBedrockAiAgentIT {
 
-  private static final String TOKEN_PATH = "/oauth2/token";
   private static final String CONVERSE = "/bedrock" + BedrockResponses.conversePath(BEDROCK_MODEL);
-  private static final String CLIENT_SECRET = "it-client-secret-value";
 
-  private final FakeHttpServer idp = new FakeHttpServer();
+  private final FakeHttpServer bam = new FakeHttpServer().on(TOKEN_PATH, BamResponses.issuing());
   private final FakeHttpServer gateway = new FakeHttpServer();
   // The mapper the connector runtime uses to turn results into process variables.
   private final ObjectMapper json = ConnectorsObjectMapperSupplier.getCopy();
 
   @AfterEach
   void tearDown() {
-    idp.close();
+    bam.close();
     gateway.close();
   }
 
   private ApplicationContextRunner runtime() {
-    idp.on(TOKEN_PATH, (req, n) -> Response.json(200, TokenResponses.token("org-jwt-" + n, 3600)));
     return contextRunner()
+        .withPropertyValues(BamResponses.properties(bam))
         .withPropertyValues(
             "organization.ai-gateway.auth.enabled=true",
-            "organization.ai-gateway.auth.allow-insecure-http=true",
-            "organization.ai-gateway.auth.mode=OAUTH2_CLIENT_CREDENTIALS",
-            "organization.ai-gateway.auth.oauth2.token-uri=" + idp.baseUrl() + TOKEN_PATH,
-            "organization.ai-gateway.auth.oauth2.client-id=camunda-ai-agent",
-            "organization.ai-gateway.auth.oauth2.client-secret=" + CLIENT_SECRET,
             "organization.ai-gateway.auth.static-headers[0].name=Accept",
             "organization.ai-gateway.auth.static-headers[0].value=application/json",
             "organization.ai-gateway.auth.static-headers[1].name=Host",
@@ -153,7 +147,7 @@ class OrganizationBedrockAiAgentIT {
               assertThat(body1.get("inferenceConfig").get("maxTokens").asInt()).isEqualTo(512);
               assertThat(body1.get("toolConfig").get("tools").get(0).get("toolSpec").get("name").asText())
                   .isEqualTo("GetWeather");
-              assertThat(request1.header("x-bam-token")).isEqualTo("org-jwt-1");
+              assertThat(request1.header("x-bam-token")).isEqualTo(BamResponses.jwt(1));
               assertThat(request1.header("Accept")).isEqualTo("application/json");
               assertThat(request1.header("Host")).isEqualTo("bedrock-gateway.internal.example");
               assertThat(request1.header("Authorization")).isNull();
@@ -174,9 +168,11 @@ class OrganizationBedrockAiAgentIT {
               final JsonNode messages = body2.get("messages");
               assertThat(messages.get(messages.size() - 1).toString()).contains("toolResult").contains("call_1").contains("sunny");
 
-              // One token served both turns (cached), obtained with client credentials.
-              assertThat(idp.callCount(TOKEN_PATH)).isEqualTo(1);
-              assertThat(gateway.requests(CONVERSE).get(1).header("x-bam-token")).isEqualTo("org-jwt-1");
+              // One BAM token served both turns (cached), obtained with Basic authentication.
+              assertThat(bam.callCount(TOKEN_PATH)).isEqualTo(1);
+              assertThat(bam.requests(TOKEN_PATH).getFirst().header("Authorization"))
+                  .isEqualTo(BamResponses.basicAuthorization());
+              assertThat(gateway.requests(CONVERSE).get(1).header("x-bam-token")).isEqualTo(BamResponses.jwt(1));
             });
   }
 
@@ -185,7 +181,7 @@ class OrganizationBedrockAiAgentIT {
     gateway.on(
         CONVERSE,
         (req, n) ->
-            "org-jwt-1".equals(req.header("x-bam-token"))
+            BamResponses.jwt(1).equals(req.header("x-bam-token"))
                 ? Response.json(401, BedrockResponses.error("token expired"))
                 : Response.json(200, BedrockResponses.text("Fine.")));
 
@@ -197,10 +193,10 @@ class OrganizationBedrockAiAgentIT {
                       ctx.getBean(AiAgentFunction.class).execute(outboundContext(agentTaskInputs(null, List.of())));
 
               assertThat(response.responseText()).isEqualTo("Fine.");
-              assertThat(idp.callCount(TOKEN_PATH)).isEqualTo(2);
+              assertThat(bam.callCount(TOKEN_PATH)).isEqualTo(2);
               assertThat(gateway.requests(CONVERSE))
                   .extracting(r -> r.header("x-bam-token"))
-                  .containsExactly("org-jwt-1", "org-jwt-2");
+                  .containsExactly(BamResponses.jwt(1), BamResponses.jwt(2));
             });
   }
 
@@ -222,20 +218,22 @@ class OrganizationBedrockAiAgentIT {
                           assertThat(ce.getErrorCode()).isEqualTo(AgentErrorCodes.ERROR_CODE_FAILED_MODEL_CALL);
                           assertThat(ce.getMessage())
                               .startsWith("Model call failed: Organization Bedrock gateway authentication failed")
-                              .doesNotContain("org-jwt");
+                              .doesNotContain(BamResponses.jwt(1))
+                              .doesNotContain(BamResponses.jwt(2));
                         }));
 
     // original + one refresh-retry; the non-retriable exception stops LangChain4j's retry loop
     assertThat(gateway.callCount(CONVERSE)).isEqualTo(2);
-    assertThat(output.getAll()).doesNotContain("org-jwt").doesNotContain(CLIENT_SECRET);
+    // the issued token is logged on purpose; the BAM password must not be
+    assertThat(output.getAll()).doesNotContain(BamResponses.PASSWORD);
   }
 
   @Test
-  void identityProviderOutageFailsClosedWithoutCallingTheGateway(CapturedOutput output) {
+  void bamOutageFailsClosedWithoutCallingTheGateway(CapturedOutput output) {
     runtime()
         .run(
             ctx -> {
-              idp.on(TOKEN_PATH, Response.json(503, "{\"error\":\"temporarily_unavailable\"}"));
+              bam.on(TOKEN_PATH, Response.json(503, "{\"error\":\"temporarily unavailable\"}"));
 
               assertThatThrownBy(
                       () ->
@@ -247,10 +245,10 @@ class OrganizationBedrockAiAgentIT {
                   .extracting(e -> ((ConnectorException) e).getErrorCode())
                   .isEqualTo(AgentErrorCodes.ERROR_CODE_FAILED_MODEL_CALL);
 
-              assertThat(idp.callCount(TOKEN_PATH)).isEqualTo(1);
+              assertThat(bam.callCount(TOKEN_PATH)).isEqualTo(1);
               assertThat(gateway.requests()).isEmpty();
             });
-    assertThat(output.getAll()).doesNotContain(CLIENT_SECRET);
+    assertThat(output.getAll()).doesNotContain(BamResponses.PASSWORD);
   }
 
   @Test
@@ -267,7 +265,7 @@ class OrganizationBedrockAiAgentIT {
                   .hasMessageContaining("Organization Bedrock gateway authentication failed")
                   .hasMessageContaining("custom endpoint is not an absolute url with a host");
 
-              assertThat(idp.requests()).isEmpty();
+              assertThat(bam.requests()).isEmpty();
               assertThat(gateway.requests()).isEmpty();
             });
   }

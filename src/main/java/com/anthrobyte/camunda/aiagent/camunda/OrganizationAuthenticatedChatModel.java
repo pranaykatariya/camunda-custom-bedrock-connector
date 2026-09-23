@@ -3,8 +3,8 @@ package com.anthrobyte.camunda.aiagent.camunda;
 import static com.anthrobyte.camunda.aiagent.auth.AuthenticationFailureReason.GATEWAY_ACCESS_DENIED;
 import static com.anthrobyte.camunda.aiagent.auth.AuthenticationFailureReason.GATEWAY_REJECTED_CREDENTIALS;
 
+import com.anthrobyte.camunda.aiagent.auth.BamTokenCache;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationException;
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationUnavailableException;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.ModelProvider;
@@ -44,12 +44,12 @@ final class OrganizationAuthenticatedChatModel implements ChatModel {
   private static final int MAX_CAUSE_DEPTH = 16;
 
   private final ChatModel delegate;
-  private final OrganizationAuthenticationProvider authenticationProvider;
+  private final BamTokenCache tokenCache;
 
   OrganizationAuthenticatedChatModel(
-      ChatModel delegate, OrganizationAuthenticationProvider authenticationProvider) {
+      ChatModel delegate, BamTokenCache tokenCache) {
     this.delegate = delegate;
-    this.authenticationProvider = authenticationProvider;
+    this.tokenCache = tokenCache;
   }
 
   @Override
@@ -63,7 +63,7 @@ final class OrganizationAuthenticatedChatModel implements ChatModel {
         .log("Bedrock chat call starting");
     try {
       // Throws the sanitized organization exception if no credentials can be obtained.
-      authenticationProvider.getCredentials();
+      tokenCache.getCredentials();
       final ChatResponse response = delegate.chat(chatRequest);
       logCompleted(response, messages, tools, elapsedMillis(started));
       return response;

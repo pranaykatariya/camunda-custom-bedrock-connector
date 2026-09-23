@@ -9,8 +9,8 @@
   <version>1.0.0-SNAPSHOT</version>
   <name>Organization AI Agent Connector Runtime</name>
   <description>
-    Camunda 8.9 connector runtime running the standard AI Agent connector, with organization-specific
-    authentication for the AWS Bedrock provider through the organization Bedrock gateway.
+    Extension jar for the Camunda 8.9 connector runtime: organization-specific authentication for the
+    standard AI Agent connector's AWS Bedrock provider through the organization Bedrock gateway.
   </description>
 
   <properties>
@@ -22,7 +22,7 @@
     -->
     <version.connectors>8.9.12</version.connectors>
 
-    <!-- Must match the version managed by connector-parent (used only for the build plugin). -->
+    <!-- Must match the version managed by connector-parent (used only for the annotation processor). -->
     <version.spring-boot>4.1.1</version.spring-boot>
 
     <java.version>21</java.version>
@@ -48,7 +48,7 @@
       <groupId>io.camunda.connector</groupId>
       <artifactId>spring-boot-starter-camunda-connectors</artifactId>
       <version>${version.connectors}</version>
-      <!-- Provided by the Camunda connector runtime; still bundled into the -exec jar. -->
+      <!-- Provided by the Camunda connector runtime. -->
       <scope>provided</scope>
     </dependency>
 
@@ -57,7 +57,7 @@
       <groupId>io.camunda.connector</groupId>
       <artifactId>connector-agentic-ai</artifactId>
       <version>${version.connectors}</version>
-      <!-- Provided by the Camunda connector runtime; still bundled into the -exec jar. -->
+      <!-- Provided by the Camunda connector runtime. -->
       <scope>provided</scope>
     </dependency>
 
@@ -104,37 +104,6 @@
             <include>**/*IT.java</include>
           </includes>
         </configuration>
-      </plugin>
-      <plugin>
-        <!-- Implementation-Version in the manifest: logged at startup (RuntimeStartupReport). -->
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-jar-plugin</artifactId>
-        <configuration>
-          <archive>
-            <manifest>
-              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
-            </manifest>
-          </archive>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-maven-plugin</artifactId>
-        <version>${version.spring-boot}</version>
-        <executions>
-          <execution>
-            <goals>
-              <goal>repackage</goal>
-            </goals>
-            <configuration>
-              <!--
-                Keep the plain jar thin (only our classes) so it can be dropped into the Camunda
-                connector runtime; the standalone fat jar is written as *-exec.jar.
-              -->
-              <classifier>exec</classifier>
-            </configuration>
-          </execution>
-        </executions>
       </plugin>
     </plugins>
   </build>

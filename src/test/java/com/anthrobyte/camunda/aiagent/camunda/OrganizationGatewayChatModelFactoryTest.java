@@ -13,9 +13,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.anthrobyte.camunda.aiagent.auth.BamTokenCache;
 import com.anthrobyte.camunda.aiagent.auth.GatewayCredentials;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationException;
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
 import com.anthrobyte.camunda.aiagent.support.BedrockResponses;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.Response;
@@ -47,8 +47,12 @@ class OrganizationGatewayChatModelFactoryTest {
           .on(CONVERSE, Response.json(200, BedrockResponses.text("bedrock ok")))
           .on(OPENAI_CHAT, Response.json(200, OpenAiResponses.text("openai ok")));
 
-  private final OrganizationAuthenticationProvider organizationAuth =
-      () -> GatewayCredentials.of("x-bam-token", "org-token");
+  private final BamTokenCache organizationAuth = mock(BamTokenCache.class);
+
+  {
+    when(organizationAuth.getCredentials())
+        .thenReturn(new GatewayCredentials(Map.of("x-bam-token", "org-token")));
+  }
 
   @AfterEach
   void tearDown() {

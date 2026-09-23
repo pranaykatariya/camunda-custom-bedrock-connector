@@ -12,9 +12,8 @@ import java.util.stream.Collectors;
  * The HTTP headers that authenticate one request against the organization Bedrock gateway.
  *
  * <p>Instances are immutable and compared by <b>identity</b>: {@link
- * OrganizationAuthenticationProvider#invalidate(GatewayCredentials)} uses identity to invalidate
- * only the exact credentials the gateway rejected, never a newer token another thread already
- * obtained.
+ * BamTokenCache#invalidate(GatewayCredentials)} uses identity to invalidate only the exact
+ * credentials the gateway rejected, never a newer token another thread already obtained.
  *
  * <p>{@link #toString()} prints header <i>names</i> only. Header values are credentials and must
  * never be logged.
@@ -47,10 +46,6 @@ public final class GatewayCredentials {
         copy.keySet().stream()
             .map(name -> name.toLowerCase(Locale.ROOT))
             .collect(Collectors.toUnmodifiableSet());
-  }
-
-  public static GatewayCredentials of(String headerName, String headerValue) {
-    return new GatewayCredentials(Map.of(headerName, headerValue));
   }
 
   /** Header name to value, in insertion order. Values are secrets. */

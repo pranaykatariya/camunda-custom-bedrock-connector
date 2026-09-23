@@ -4,7 +4,7 @@ import static com.anthrobyte.camunda.aiagent.support.AgenticAiTestInfrastructure
 import static com.anthrobyte.camunda.aiagent.support.AgenticAiTestInfrastructure.outboundContext;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
+import com.anthrobyte.camunda.aiagent.auth.BamTokenCache;
 import com.anthrobyte.camunda.aiagent.camunda.OrganizationGatewayChatModelFactory;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer;
 import com.anthrobyte.camunda.aiagent.support.FakeHttpServer.Response;
@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /**
@@ -66,7 +67,7 @@ class StandardBehaviourRegressionIT {
               assertThat(ctx.getBean(ChatModelFactory.class))
                   .isExactlyInstanceOf(ChatModelFactoryImpl.class);
               assertThat(ctx).doesNotHaveBean(OrganizationGatewayChatModelFactory.class);
-              assertThat(ctx).doesNotHaveBean(OrganizationAuthenticationProvider.class);
+              assertThat(ctx).doesNotHaveBean(BamTokenCache.class);
             });
   }
 
@@ -76,7 +77,6 @@ class StandardBehaviourRegressionIT {
         .withPropertyValues(
             "organization.ai-gateway.auth.enabled=false",
             // even a complete (would-be valid) configuration must stay inert
-            "organization.ai-gateway.auth.mode=STATIC_HEADERS",
             "organization.ai-gateway.auth.static-headers[0].name=X-Org",
             "organization.ai-gateway.auth.static-headers[0].value=must-not-be-sent")
         .run(
@@ -96,20 +96,22 @@ class StandardBehaviourRegressionIT {
             });
   }
 
-  private static final String[] ENABLED = {
-    "organization.ai-gateway.auth.enabled=true",
-    "organization.ai-gateway.auth.mode=STATIC_HEADERS",
-    "organization.ai-gateway.auth.static-headers[0].name=x-bam-token",
-    "organization.ai-gateway.auth.static-headers[0].value=must-not-be-sent"
-  };
+  private static ApplicationContextRunner enabled() {
+    // Non-Bedrock providers never request a BAM token, so the endpoint is never called.
+    return contextRunner()
+        .withPropertyValues(
+            "organization.ai-gateway.auth.enabled=true",
+            "organization.ai-gateway.auth.bam.token-url=https://bam.invalid/api/token",
+            "organization.ai-gateway.auth.bam.username=bam-user",
+            "organization.ai-gateway.auth.bam.password=must-not-be-sent");
+  }
 
   @Test
   void taskAndSubProcessShareTheSameFrameworkAdapterAndFactory() {
     // Both AI Agent variants (Task = outbound connector, Sub-process = job worker) reach the model
     // through the single Langchain4JAiFrameworkAdapter bean, hence through the one ChatModelFactory
     // bean that this project overrides.
-    contextRunner()
-        .withPropertyValues(ENABLED)
+    enabled()
         .run(
             ctx -> {
               final var adapter = ctx.getBean(Langchain4JAiFrameworkAdapter.class);
@@ -128,8 +130,7 @@ class StandardBehaviourRegressionIT {
 
   @Test
   void enabled_openAiCompatibleStillUsesElementApiKeyAndNoOrganizationHeaders() {
-    contextRunner()
-        .withPropertyValues(ENABLED)
+    enabled()
         .run(
             ctx -> {
               final AgentResponse response =
@@ -153,8 +154,7 @@ class StandardBehaviourRegressionIT {
                 responses.add(
                     (AgentResponse)
                         ctx.getBean(AiAgentFunction.class).execute(outboundContext(inputs("k")))));
-    contextRunner()
-        .withPropertyValues(ENABLED)
+    enabled()
         .run(
             ctx ->
                 responses.add(

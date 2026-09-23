@@ -22,7 +22,7 @@ class GatewayCredentialsTest {
 
   @Test
   void headerLookupIsCaseInsensitive() {
-    final var credentials = GatewayCredentials.of("Authorization", "Bearer t");
+    final var credentials = new GatewayCredentials(Map.of("Authorization", "Bearer t"));
 
     assertThat(credentials.containsHeader("authorization")).isTrue();
     assertThat(credentials.containsHeader("AUTHORIZATION")).isTrue();
@@ -44,24 +44,10 @@ class GatewayCredentialsTest {
 
   @Test
   void headersAreImmutable() {
-    final var credentials = GatewayCredentials.of("Authorization", "Bearer t");
+    final var credentials = new GatewayCredentials(Map.of("Authorization", "Bearer t"));
 
     assertThatThrownBy(() -> credentials.headers().put("x", "y"))
         .isInstanceOf(UnsupportedOperationException.class);
-  }
-
-  @Test
-  void staticHeadersProviderReturnsFixedCredentialsAndCannotRefresh() {
-    final var provider =
-        new StaticHeadersAuthenticationProvider(
-            Map.of("X-Client-ID", "id", "X-Client-Secret", "secret"));
-
-    assertThat(provider.getCredentials()).isSameAs(provider.getCredentials());
-    assertThat(provider.getCredentials().headers())
-        .containsEntry("X-Client-ID", "id")
-        .containsEntry("X-Client-Secret", "secret");
-    assertThat(provider.supportsRefresh()).isFalse();
-    assertThat(provider.toString()).doesNotContain("secret\"").doesNotContain("=secret");
   }
 
   @Test

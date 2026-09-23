@@ -18,8 +18,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Token-based authentication with a cached, shared token from an {@link AccessTokenSource}
- * (placeholder JWT, OAuth 2.0 client credentials, or your own).
+ * The organization credentials for the Bedrock gateway: a BAM token from {@link BamTokenClient},
+ * cached and shared by all AI Agent jobs of this pod, sent in the token header next to the static
+ * headers. {@link com.anthrobyte.camunda.aiagent.transport.AuthenticatingSdkHttpClient} calls
+ * {@link #getCredentials()} for every HTTP attempt and {@link #invalidate(GatewayCredentials)}
+ * after a gateway 401.
  *
  * <h2>Concurrency model</h2>
  *
@@ -31,9 +34,9 @@ import org.slf4j.LoggerFactory;
  *       wait for that result, then take the fresh token via a double-check instead of issuing
  *       their own request. This avoids a refresh stampede when many AI Agent jobs start at once.
  *   <li><b>Shared failure.</b> If the in-flight refresh fails, the threads that were waiting for it
- *       get the same failure instead of each retrying serially against a failing token source.
+ *       get the same failure instead of each retrying serially against a failing BAM endpoint.
  *       Threads that arrive later try again.
- *   <li><b>Bounded waiting.</b> Waiting for the lock is bounded, so a hung token source cannot
+ *   <li><b>Bounded waiting.</b> Waiting for the lock is bounded, so a hung BAM endpoint cannot
  *       block job worker threads forever.
  *   <li><b>Precise invalidation.</b> {@link #invalidate(GatewayCredentials)} compares by identity
  *       and clears the cache only if the rejected credentials are still the current ones. Many
@@ -46,24 +49,22 @@ import org.slf4j.LoggerFactory;
  * never carry a token that expires mid-request. For very short-lived tokens the skew is capped at
  * half the lifetime, so a token is never considered expired on arrival.
  */
-public class CachingTokenAuthenticationProvider
-    implements OrganizationAuthenticationProvider, AutoCloseable {
+public class BamTokenCache implements AutoCloseable {
 
-  private static final Logger LOG = LoggerFactory.getLogger(CachingTokenAuthenticationProvider.class);
+  private static final Logger LOG = LoggerFactory.getLogger(BamTokenCache.class);
 
   static final String TOKEN_PLACEHOLDER = "{token}";
 
-  /** Waiting this long for a concurrent refresh is logged at INFO: the token source is slow. */
+  /** Waiting this long for a concurrent refresh is logged at INFO: BAM is slow. */
   private static final long SLOW_REFRESH_WAIT_MS = 1_000;
 
-  private final AccessTokenSource tokenSource;
+  private final BamTokenClient tokenClient;
   private final String headerName;
   private final String headerValueTemplate;
   private final Map<String, String> additionalHeaders;
   private final Duration refreshSkew;
   private final Duration refreshWaitTimeout;
   private final Clock clock;
-  private final AutoCloseable resources;
 
   private final AtomicReference<CachedCredentials> current = new AtomicReference<>();
   private final ReentrantLock refreshLock = new ReentrantLock();
@@ -72,19 +73,18 @@ public class CachingTokenAuthenticationProvider
   private volatile FailedRefresh lastFailure;
 
   /**
+   * @param tokenClient fetches new tokens; closed by {@link #close()}
    * @param additionalHeaders sent with every request next to the token header, in insertion order
-   * @param resources closed by {@link #close()}, for example the token source's HTTP client
    */
-  public CachingTokenAuthenticationProvider(
-      AccessTokenSource tokenSource,
+  public BamTokenCache(
+      BamTokenClient tokenClient,
       String headerName,
       String headerValueTemplate,
       Map<String, String> additionalHeaders,
       Duration refreshSkew,
       Duration refreshWaitTimeout,
-      Clock clock,
-      AutoCloseable resources) {
-    this.tokenSource = Objects.requireNonNull(tokenSource);
+      Clock clock) {
+    this.tokenClient = Objects.requireNonNull(tokenClient);
     this.headerName = requireText(headerName, "headerName");
     this.headerValueTemplate = requireText(headerValueTemplate, "headerValueTemplate");
     if (!headerValueTemplate.contains(TOKEN_PLACEHOLDER)) {
@@ -96,9 +96,7 @@ public class CachingTokenAuthenticationProvider
     this.refreshSkew = Objects.requireNonNull(refreshSkew);
     this.refreshWaitTimeout = Objects.requireNonNull(refreshWaitTimeout);
     this.clock = Objects.requireNonNull(clock);
-    this.resources = resources;
     LOG.atDebug()
-        .addKeyValue("tokenSource", tokenSource.getClass().getSimpleName())
         .addKeyValue("headerName", headerName)
         .addKeyValue("additionalHeaders", this.additionalHeaders.keySet())
         .addKeyValue("refreshSkew", refreshSkew)
@@ -106,7 +104,10 @@ public class CachingTokenAuthenticationProvider
         .log("Caching organization authentication provider created");
   }
 
-  @Override
+  /**
+   * Returns the credentials to attach to the next gateway request. Called once per HTTP attempt:
+   * a single volatile read while the cached token is valid.
+   */
   public GatewayCredentials getCredentials() {
     final CachedCredentials cached = current.get();
     if (cached != null && cached.isValidAt(clock.instant())) {
@@ -122,7 +123,10 @@ public class CachingTokenAuthenticationProvider
     return refresh();
   }
 
-  @Override
+  /**
+   * Called when the gateway rejected {@code rejected} with HTTP 401. Discards the cached token, but
+   * only if it is still the current one.
+   */
   public void invalidate(GatewayCredentials rejected) {
     final CachedCredentials cached = current.get();
     if (cached != null
@@ -136,11 +140,6 @@ public class CachingTokenAuthenticationProvider
           "Ignoring invalidation of organization credentials that are no longer current "
               + "(already refreshed by another request)");
     }
-  }
-
-  @Override
-  public boolean supportsRefresh() {
-    return true;
   }
 
   private GatewayCredentials refresh() {
@@ -179,7 +178,7 @@ public class CachingTokenAuthenticationProvider
   private GatewayCredentials fetchAndCache() {
     final long started = System.nanoTime();
     try {
-      final AccessToken token = requestToken();
+      final BamToken token = requestToken();
       final CachedCredentials fresh = cache(token);
       current.set(fresh);
       lastFailure = null;
@@ -206,17 +205,16 @@ public class CachingTokenAuthenticationProvider
     }
   }
 
-  /** Calls the source and turns any unexpected exception into a sanitized, permanent failure. */
-  private AccessToken requestToken() {
-    final AccessToken token;
+  /** Calls BAM and turns any unexpected exception into a sanitized, permanent failure. */
+  private BamToken requestToken() {
+    final BamToken token;
     try {
-      token = tokenSource.requestToken();
+      token = tokenClient.requestToken();
     } catch (OrganizationAuthenticationException | OrganizationAuthenticationUnavailableException e) {
       throw e;
     } catch (RuntimeException e) {
-      // Only the type is logged: the message of a custom source's exception could hold secrets.
+      // Only the type is logged: an unexpected exception's message could hold secrets.
       LOG.atWarn()
-          .addKeyValue("tokenSource", tokenSource.getClass().getName())
           .addKeyValue("error", e.getClass().getName())
           .log("Organization token source failed unexpectedly");
       throw new OrganizationAuthenticationException(TOKEN_SOURCE_FAILED);
@@ -237,7 +235,7 @@ public class CachingTokenAuthenticationProvider
     return e.getClass().getSimpleName();
   }
 
-  private CachedCredentials cache(AccessToken token) {
+  private CachedCredentials cache(BamToken token) {
     final Instant now = clock.instant();
     final Duration lifetime = Duration.between(now, token.expiresAt());
     final Duration skew =
@@ -271,11 +269,9 @@ public class CachingTokenAuthenticationProvider
   }
 
   @Override
-  public void close() throws Exception {
+  public void close() {
     current.set(null);
-    if (resources != null) {
-      resources.close();
-    }
+    tokenClient.close();
     LOG.atInfo()
         .addKeyValue("refreshCount", successfulRefreshes.get())
         .log("Organization authentication provider closed; cached token discarded");
@@ -283,8 +279,8 @@ public class CachingTokenAuthenticationProvider
 
   @Override
   public String toString() {
-    return "CachingTokenAuthenticationProvider{tokenSource="
-        + tokenSource.getClass().getSimpleName()
+    return "BamTokenCache{tokenClient="
+        + tokenClient
         + ", headerName="
         + headerName
         + ", additionalHeaders="

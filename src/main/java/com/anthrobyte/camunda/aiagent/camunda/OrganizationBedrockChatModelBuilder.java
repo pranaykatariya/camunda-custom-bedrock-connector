@@ -2,8 +2,8 @@ package com.anthrobyte.camunda.aiagent.camunda;
 
 import static com.anthrobyte.camunda.aiagent.auth.AuthenticationFailureReason.ENDPOINT_NOT_CONFIGURED;
 
+import com.anthrobyte.camunda.aiagent.auth.BamTokenCache;
 import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationException;
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
 import com.anthrobyte.camunda.aiagent.transport.AuthenticatingSdkHttpClientBuilder;
 import dev.langchain4j.model.bedrock.BedrockChatModel;
 import io.camunda.connector.agenticai.aiagent.framework.langchain4j.CloseableChatModel;
@@ -53,17 +53,17 @@ public class OrganizationBedrockChatModelBuilder {
 
   private final Duration defaultTimeout;
   private final AgenticAiHttpProxySupport proxySupport;
-  private final OrganizationAuthenticationProvider authenticationProvider;
+  private final BamTokenCache tokenCache;
   private final boolean retryOnUnauthorized;
 
   public OrganizationBedrockChatModelBuilder(
       AgenticAiConnectorsConfigurationProperties agenticAiProperties,
       AgenticAiHttpProxySupport proxySupport,
-      OrganizationAuthenticationProvider authenticationProvider,
+      BamTokenCache tokenCache,
       boolean retryOnUnauthorized) {
     this.defaultTimeout = agenticAiProperties.aiagent().chatModel().api().defaultTimeout();
     this.proxySupport = proxySupport;
-    this.authenticationProvider = authenticationProvider;
+    this.tokenCache = tokenCache;
     this.retryOnUnauthorized = retryOnUnauthorized;
   }
 
@@ -92,7 +92,7 @@ public class OrganizationBedrockChatModelBuilder {
               .timeout(timeout);
       CamundaBedrockClientParity.applyModelParameters(connection, modelBuilder);
       final var chatModel =
-          new OrganizationAuthenticatedChatModel(modelBuilder.build(), authenticationProvider);
+          new OrganizationAuthenticatedChatModel(modelBuilder.build(), tokenCache);
       return new CloseableChatModelDelegate(chatModel, client);
     } catch (RuntimeException e) {
       LOG.atWarn()
@@ -121,7 +121,7 @@ public class OrganizationBedrockChatModelBuilder {
             new AuthenticatingSdkHttpClientBuilder(
                 CamundaBedrockClientParity.apacheHttpClientBuilder(
                     proxySupport.getProxyConfiguration(), endpoint, timeout),
-                authenticationProvider,
+                tokenCache,
                 retryOnUnauthorized))
         .build();
   }

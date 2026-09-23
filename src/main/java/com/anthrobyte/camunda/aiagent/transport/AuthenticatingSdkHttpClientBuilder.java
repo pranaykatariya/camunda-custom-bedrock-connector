@@ -1,6 +1,6 @@
 package com.anthrobyte.camunda.aiagent.transport;
 
-import com.anthrobyte.camunda.aiagent.auth.OrganizationAuthenticationProvider;
+import com.anthrobyte.camunda.aiagent.auth.BamTokenCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.http.SdkHttpClient;
@@ -20,15 +20,15 @@ public final class AuthenticatingSdkHttpClientBuilder
   private static final Logger LOG = LoggerFactory.getLogger(AuthenticatingSdkHttpClientBuilder.class);
 
   private final SdkHttpClient.Builder<?> delegate;
-  private final OrganizationAuthenticationProvider authenticationProvider;
+  private final BamTokenCache tokenCache;
   private final boolean retryOnUnauthorized;
 
   public AuthenticatingSdkHttpClientBuilder(
       SdkHttpClient.Builder<?> delegate,
-      OrganizationAuthenticationProvider authenticationProvider,
+      BamTokenCache tokenCache,
       boolean retryOnUnauthorized) {
     this.delegate = delegate;
-    this.authenticationProvider = authenticationProvider;
+    this.tokenCache = tokenCache;
     this.retryOnUnauthorized = retryOnUnauthorized;
   }
 
@@ -36,7 +36,7 @@ public final class AuthenticatingSdkHttpClientBuilder
   public SdkHttpClient buildWithDefaults(AttributeMap serviceDefaults) {
     final SdkHttpClient client =
         new AuthenticatingSdkHttpClient(
-            delegate.buildWithDefaults(serviceDefaults), authenticationProvider, retryOnUnauthorized);
+            delegate.buildWithDefaults(serviceDefaults), tokenCache, retryOnUnauthorized);
     LOG.atDebug()
         .addKeyValue("delegateClient", client.clientName())
         .addKeyValue("retryOnUnauthorized", retryOnUnauthorized)

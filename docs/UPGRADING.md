@@ -85,7 +85,7 @@ Camunda's Bedrock client setup is in private / package-private methods, so
 | Camunda 8.9.12 source | What was copied | Tripwire |
 |---|---|---|
 | `ChatModelFactoryImpl.CONNECT_TIMEOUT` | Apache `connectionTimeout` = 15 s | review only |
-| `ChatModelFactoryImpl#deriveTimeoutSetting` | element timeout if `isPositive()`, else `aiagent.chatModel.api.defaultTimeout` | `OrganizationBedrockChatModelBuilderTest#regionEndpointAndElementTimeout…`, `#missingOrNonPositiveElementTimeout…` (asserted against our copy, so review the source) |
+| `ChatModelFactoryImpl#deriveTimeoutSetting` | element timeout if `isPositive()`, else `aiagent.chatModel.api.defaultTimeout` | `BarclaysBedrockChatModelBuilderTest#regionEndpointAndElementTimeout…`, `#missingOrNonPositiveElementTimeout…` (asserted against our copy, so review the source) |
 | `ChatModelFactoryImpl#createBedrockClient` | `Region.of(region)`, `endpointOverride(URI.create(endpoint))`, `apiCallTimeout(timeout)`, `socketTimeout(timeout)`, `httpClientBuilder(...)` | same, plus `#requestBodyIsIdenticalToStandardConnector` |
 | `ChatModelFactoryImpl#createBedrockChatModel` | `BedrockChatModel.builder().client().modelId().timeout()`, `CloseableChatModelDelegate(model, client)` | `#requestBodyIsIdenticalToStandardConnector`, `#closingTheModel…` |
 | `ChatModelFactoryImpl#applyBedrockModelParametersIfPresent` | maxTokens→`maxOutputTokens`, temperature, topP, each only if present | `#modelParametersAreSentAsInferenceConfig`, `#onlyPresentModelParametersAreSent`, `#requestBodyIsIdenticalToStandardConnector` (**fails if Camunda maps a new parameter**) |
@@ -99,14 +99,14 @@ option), our copy will not apply it until it is ported.
 
 | # | Assumption | Where used | What detects a change |
 |---|---|---|---|
-| 1 | `ChatModelFactory` bean is `@ConditionalOnMissingBean` in `AgenticAiLangchain4JFrameworkConfiguration`, imported by `AgenticAiConnectorsAutoConfiguration` | `OrganizationAuthAutoConfiguration` | `RuntimeApplicationSmokeIT`, `OrganizationBedrockAiAgentIT#camundaChatModelFactoryBeanIsReplaced…` |
+| 1 | `ChatModelFactory` bean is `@ConditionalOnMissingBean` in `AgenticAiLangchain4JFrameworkConfiguration`, imported by `AgenticAiConnectorsAutoConfiguration` | `BarclaysAuthAutoConfiguration` | `RuntimeApplicationSmokeIT`, `BarclaysBedrockAiAgentIT#camundaChatModelFactoryBeanIsReplaced…` |
 | 2 | `ChatModelFactory#createChatModel(ProviderConfiguration)`, `ChatModelFactoryImpl(properties, ChatModelHttpProxySupport)`, `CloseableChatModelDelegate(ChatModel, AutoCloseable)` | router, auto-configuration, builder | compile error |
 | 3 | `BedrockProviderConfiguration` / `BedrockConnection(region, endpoint, authentication, timeouts, model)` / `BedrockModelParameters(maxTokens, temperature, topP)` record shapes; `AwsDefaultCredentialsChainAuthentication` exists | builder, templates | compile error, generator exits |
 | 4 | `AgenticAiHttpProxySupport#getProxyConfiguration`, `ProxyConfiguration#getProxyDetails`, `NonProxyHosts#getNonProxyHostRegexPatterns` are public | parity class | compile error |
-| 5 | AWS SDK: `SdkHttpClient#prepareRequest` runs per attempt after signing; `httpClientBuilder` clients are closed with the service client; `authSchemeProvider`/`putAuthScheme(NoAuthAuthScheme)`; Apache honours a request `Host` header | transport, builder | `OrganizationBedrockChatModelBuilderTest` (headers, no SigV4, 401 retry, close), `AuthenticatingSdkHttpClientTest#hostHeaderCanBeOverridden` |
-| 6 | LangChain4j `BedrockChatModel`: 401 → non-retriable; `NonRetriableException` not retried | error semantics | `#persistentUnauthorized…` (expects exactly 2 calls), `OrganizationBedrockAiAgentIT` |
-| 7 | `Langchain4JAiFrameworkAdapter` wraps model failures as `ConnectorException(FAILED_MODEL_CALL, "Model call failed: …")` | error semantics | `OrganizationBedrockAiAgentIT` |
-| 8 | Bedrock validation `isDefaultCredentialsChainUsedInSaaS` only checks `CAMUNDA_CONNECTOR_RUNTIME_SAAS` | templates fix `defaultCredentialsChain` | `OrganizationBedrockAiAgentIT` (binds a `defaultCredentialsChain` element) |
+| 5 | AWS SDK: `SdkHttpClient#prepareRequest` runs per attempt after signing; `httpClientBuilder` clients are closed with the service client; `authSchemeProvider`/`putAuthScheme(NoAuthAuthScheme)`; Apache honours a request `Host` header | transport, builder | `BarclaysBedrockChatModelBuilderTest` (headers, no SigV4, 401 retry, close), `AuthenticatingSdkHttpClientTest#hostHeaderCanBeOverridden` |
+| 6 | LangChain4j `BedrockChatModel`: 401 → non-retriable; `NonRetriableException` not retried | error semantics | `#persistentUnauthorized…` (expects exactly 2 calls), `BarclaysBedrockAiAgentIT` |
+| 7 | `Langchain4JAiFrameworkAdapter` wraps model failures as `ConnectorException(FAILED_MODEL_CALL, "Model call failed: …")` | error semantics | `BarclaysBedrockAiAgentIT` |
+| 8 | Bedrock validation `isDefaultCredentialsChainUsedInSaaS` only checks `CAMUNDA_CONNECTOR_RUNTIME_SAAS` | templates fix `defaultCredentialsChain` | `BarclaysBedrockAiAgentIT` (binds a `defaultCredentialsChain` element) |
 | 9 | Worker type overrides `CONNECTOR_AI_AGENT_TYPE` / `CONNECTOR_AI_AGENT_JOB_WORKER_TYPE` | `application.yml` | `RuntimeApplicationSmokeIT` |
 | 10 | Official templates contain the task type, `provider.type` with `bedrock`, `provider.bedrock.authentication.type` with `defaultCredentialsChain`, `provider.bedrock.endpoint` | generator | the script exits with an error |
 | 11 | Spring Boot's default console pattern (this jar appends `%kvp` via `logging.pattern.console`) | `application.yml` | review manually |
@@ -114,5 +114,5 @@ option), our copy will not apply it until it is ported.
 ## If Camunda adds native support
 
 If a future release lets you customise Bedrock authentication or the Bedrock HTTP client
-officially, prefer that and delete `…aiagent.camunda`. `auth`
+officially, prefer that and delete `…connectors.camunda`. `auth`
 and `transport` are reusable as they are.

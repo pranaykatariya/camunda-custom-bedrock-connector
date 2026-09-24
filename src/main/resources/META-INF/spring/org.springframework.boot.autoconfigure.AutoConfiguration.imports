@@ -1,1 +1,1 @@
-com.anthrobyte.camunda.aiagent.config.OrganizationAuthAutoConfiguration
+com.barclays.groupcontrol.co.camunda.connectors.config.BarclaysAuthAutoConfiguration

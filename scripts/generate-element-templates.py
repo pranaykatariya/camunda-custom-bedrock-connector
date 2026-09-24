@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Derive the organization AI Agent element templates from Camunda's OFFICIAL templates.
+Derive the Barclays AI Agent element templates from Camunda's OFFICIAL templates.
 
 Nothing is hand-copied: the script downloads the official templates of the exact connectors version
 declared in pom.xml (<version.connectors>) and applies a small, reviewable set of changes:
@@ -9,9 +9,9 @@ declared in pom.xml (<version.connectors>) and applies a small, reviewable set o
   2. task definition type          -> the custom job type served by this runtime
   3. provider dropdown             -> "AWS Bedrock" only (hidden), other providers removed
   4. Bedrock authentication        -> fixed to "defaultCredentialsChain" (hidden, no fields). The
-                                      runtime ignores it and sends organization credentials instead;
+                                      runtime ignores it and sends Barclays credentials instead;
                                       access key, secret key and API key fields are removed.
-  5. Bedrock custom endpoint       -> required (the organization Bedrock gateway URL), with an
+  5. Bedrock custom endpoint       -> required (the Barclays Bedrock gateway URL), with an
                                       optional default value (--gateway-url)
 
 Every other property (region, model, max tokens, temperature, top P, timeout, prompts, tools,
@@ -19,8 +19,8 @@ memory, limits, events, response, retries, ...) is left exactly as Camunda ships
 
 Usage:
   python3 scripts/generate-element-templates.py \
-      [--task-type org.ai-gateway:aiagent:1] \
-      [--subprocess-type org.ai-gateway:aiagent-job-worker:1] \
+      [--task-type barclays.ai-gateway:aiagent:1] \
+      [--subprocess-type barclays.ai-gateway:aiagent-job-worker:1] \
       [--gateway-url https://bedrock-gateway.example.com/bedrock] \
       [--connectors-version 8.9.12] [--source-dir DIR] [--output-dir element-templates]
 """
@@ -43,16 +43,16 @@ UPSTREAM = (
 TEMPLATES = [
     {
         "upstream": "agenticai-aiagent-outbound-connector.json",
-        "output": "org-bedrock-ai-agent-task.json",
-        "id": "com.anthrobyte.connectors.aiagent.org-bedrock.v1",
-        "name": "AI Agent Task (Organization Bedrock Gateway)",
+        "output": "barclays-ai-agent-task.json",
+        "id": "com.barclays.groupcontrol.co.camunda.connectors.aiagent.v1",
+        "name": "Barclays AI Agent",
         "type_arg": "task_type",
     },
     {
         "upstream": "agenticai-aiagent-job-worker.json",
-        "output": "org-bedrock-ai-agent-subprocess.json",
-        "id": "com.anthrobyte.connectors.aiagent.jobworker.org-bedrock.v1",
-        "name": "AI Agent Sub-process (Organization Bedrock Gateway)",
+        "output": "barclays-ai-agent-subprocess.json",
+        "id": "com.barclays.groupcontrol.co.camunda.connectors.aiagent.jobworker.v1",
+        "name": "Barclays AI Agent Sub-process",
         "type_arg": "subprocess_type",
     },
 ]
@@ -98,11 +98,16 @@ def customize(template: dict, spec: dict, job_type: str, gateway_url: str | None
     upstream_id = template.get("id")
     template["id"] = spec["id"]
     template["name"] = spec["name"]
+    upstream_description = template.get("description", "").rstrip()
+    if upstream_description and not upstream_description.endswith("."):
+        upstream_description += "."
     template["description"] = (
-        template.get("description", "")
-        + " Uses AWS Bedrock through the organization Bedrock gateway with runtime-managed credentials."
-    )
-    template.setdefault("metadata", {})["derivedFrom"] = {
+        upstream_description
+        + " Uses AWS Bedrock through the Barclays Bedrock gateway with runtime-managed credentials."
+    ).lstrip()
+    metadata = template.setdefault("metadata", {})
+    metadata["keywords"] = ["Barclays", *metadata.get("keywords", [])]
+    metadata["derivedFrom"] = {
         "id": upstream_id,
         "connectorsVersion": version,
     }
@@ -142,11 +147,11 @@ def customize(template: dict, spec: dict, job_type: str, gateway_url: str | None
             auth_type_set = True
 
         if prop.get("id") == ENDPOINT_ID:
-            prop["label"] = "Organization Bedrock gateway endpoint"
+            prop["label"] = "Barclays Bedrock gateway endpoint"
             prop["optional"] = False
             prop["constraints"] = {"notEmpty": True}
             prop["tooltip"] = (
-                "Base URL of the organization Bedrock gateway. The runtime sends the organization "
+                "Base URL of the Barclays Bedrock gateway. The runtime sends the Barclays "
                 "credentials to exactly this URL; it is not validated against an allow-list. "
                 "Authentication is handled by the connector runtime; no AWS keys are needed."
             )
@@ -171,8 +176,8 @@ def customize(template: dict, spec: dict, job_type: str, gateway_url: str | None
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--connectors-version", default=None)
-    parser.add_argument("--task-type", default="org.ai-gateway:aiagent:1")
-    parser.add_argument("--subprocess-type", default="org.ai-gateway:aiagent-job-worker:1")
+    parser.add_argument("--task-type", default="barclays.ai-gateway:aiagent:1")
+    parser.add_argument("--subprocess-type", default="barclays.ai-gateway:aiagent-job-worker:1")
     parser.add_argument("--gateway-url", default=None)
     parser.add_argument("--source-dir", default=None, help="read upstream templates from here instead of GitHub")
     parser.add_argument("--output-dir", default=str(ROOT / "element-templates"))

@@ -1,0 +1,24 @@
+mindmap
+    root((barclays.ai-gateway.auth))
+        Secrets · environment only
+            BARCLAYS_AI_BAM_TOKEN_URL
+            BARCLAYS_AI_BAM_USERNAME
+            BARCLAYS_AI_BAM_PASSWORD
+        Gateway headers
+            token.header-name = x-bam-token
+            token.header-value-template
+            static-headers = Accept + Host
+        Token cache
+            refresh-skew = 60 s
+            refresh-wait-timeout = 15 s
+            retry-on-unauthorized = true
+        BAM client
+            connect-timeout = 5 s
+            request-timeout = 10 s
+            default-token-lifetime = 10 min
+            allow-insecure-http = false
+        Job types
+            Task = barclays.ai-gateway:aiagent:1
+            Sub-process = barclays.ai-gateway:aiagent-job-worker:1
+        Master switch
+            enabled = true in application.yml

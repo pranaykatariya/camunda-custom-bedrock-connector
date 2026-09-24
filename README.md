@@ -1,9 +1,9 @@
-# Organization AI Agent Connector Extension
+# Barclays AI Agent Connector Extension
 
 An extension jar for the Camunda 8.9 connector runtime. The runtime keeps running the **standard,
 unmodified Camunda AI Agent connector** (Task and Sub-process); this jar changes one thing:
 **how the AWS Bedrock provider authenticates.** Every Bedrock AI Agent call goes to the
-organization Bedrock gateway with organization headers (`x-bam-token: <token>`, plus configurable
+Barclays Bedrock gateway with Barclays headers (`x-bam-token: <token>`, plus configurable
 `Accept` and `Host`) instead of AWS SigV4.
 
 * Agent orchestration, tools, MCP, memory, prompts, tool calling, the Bedrock Converse protocol and
@@ -19,49 +19,49 @@ organization Bedrock gateway with organization headers (`x-bam-token: <token>`, 
 ## How it hooks in
 
 Camunda registers `ChatModelFactory` as `@ConditionalOnMissingBean`.
-`OrganizationAuthAutoConfiguration` runs before Camunda's auto-configuration and provides that bean
+`BarclaysAuthAutoConfiguration` runs before Camunda's auto-configuration and provides that bean
 as a small router:
 
 ```
 AI Agent (Camunda) → Langchain4JAiFrameworkAdapter (Camunda)
-  → ChatModelFactory  ◄── OrganizationGatewayChatModelFactory (this project)
-      ├─ Bedrock     → OrganizationBedrockChatModelBuilder
+  → ChatModelFactory  ◄── BarclaysGatewayChatModelFactory (this project)
+      ├─ Bedrock     → BarclaysBedrockChatModelBuilder
       │                  BedrockRuntimeClient (no signing) + BedrockChatModel (LangChain4j)
-      │                  → Apache SdkHttpClient ◄── AuthenticatingSdkHttpClient adds org headers
-      │                  → Organization Bedrock gateway → Bedrock
+      │                  → Apache SdkHttpClient ◄── AuthenticatingSdkHttpClient adds Barclays headers
+      │                  → Barclays Bedrock gateway → Bedrock
       └─ any other   → ChatModelFactoryImpl (Camunda), unchanged
 ```
 
-With `organization.ai-gateway.auth.enabled=false` nothing from this jar is active and the runtime
+With `barclays.ai-gateway.auth.enabled=false` nothing from this jar is active and the runtime
 is exactly the standard connector.
 
 ## Build and deploy
 
 ```bash
 ./mvnw verify    # all unit + integration tests, no external services needed
-./mvnw package   # target/org-ai-agent-connector-runtime-1.0.0-SNAPSHOT.jar (thin: only this project's classes)
+./mvnw package   # target/barclays-ai-agent-connector-runtime-1.0.0-SNAPSHOT.jar (thin: only this project's classes)
 ```
 
 Put the jar on the Camunda connector runtime's classpath (exactly one copy of it) and provide the
-three `ORG_AI_BAM_*` secrets. Startup validates the configuration and fails fast, listing the
+three `BARCLAYS_AI_BAM_*` secrets. Startup validates the configuration and fails fast, listing the
 offending *property names* and environment variables (never their values).
 
 ## Configuration
 
-`application.yml` (packaged in the jar) maps the settings under `organization.ai-gateway.auth.*` to
+`application.yml` (packaged in the jar) maps the settings under `barclays.ai-gateway.auth.*` to
 environment variables. Secrets must come from the environment, never from `application.yml` or BPMN.
 
 | Variable | Default | Description |
 |---|---|---|
-| `ORG_AI_BAM_TOKEN_URL` (**secret**) | – (required) | BAM token endpoint, `https://…/api/token`. |
-| `ORG_AI_BAM_USERNAME` (**secret**) | – (required) | Basic auth user name (must not contain `:`). |
-| `ORG_AI_BAM_PASSWORD` (**secret**) | – (required) | Basic auth password. |
-| `ORG_AI_GATEWAY_AUTH_ENABLED` | `true` (yml) / `false` (code) | Master switch. `false` = exactly the standard connector. |
-| `ORG_AI_GATEWAY_HOST_HEADER` | `bedrock-gateway.placeholder.invalid` (**placeholder**, warned at startup) | `Host` header the gateway routes on: `host[:port]`, not a URL. |
-| `ORG_AI_GATEWAY_TOKEN_HEADER` | `x-bam-token` | Header that carries the token. |
-| `ORG_AI_GATEWAY_TOKEN_HEADER_TEMPLATE` | `{token}` | Header value; `{token}` is replaced (e.g. `Bearer {token}`). |
-| `ORG_AI_AGENT_TASK_TYPE` → `CONNECTOR_AI_AGENT_TYPE` | `org.ai-gateway:aiagent:1` | Job type of the AI Agent **Task**. |
-| `ORG_AI_AGENT_SUBPROCESS_TYPE` → `CONNECTOR_AI_AGENT_JOB_WORKER_TYPE` | `org.ai-gateway:aiagent-job-worker:1` | Job type of the AI Agent **Sub-process**. |
+| `BARCLAYS_AI_BAM_TOKEN_URL` (**secret**) | – (required) | BAM token endpoint, `https://…/api/token`. |
+| `BARCLAYS_AI_BAM_USERNAME` (**secret**) | – (required) | Basic auth user name (must not contain `:`). |
+| `BARCLAYS_AI_BAM_PASSWORD` (**secret**) | – (required) | Basic auth password. |
+| `BARCLAYS_AI_GATEWAY_AUTH_ENABLED` | `true` (yml) / `false` (code) | Master switch. `false` = exactly the standard connector. |
+| `BARCLAYS_AI_GATEWAY_HOST_HEADER` | `bedrock-gateway.placeholder.invalid` (**placeholder**, warned at startup) | `Host` header the gateway routes on: `host[:port]`, not a URL. |
+| `BARCLAYS_AI_GATEWAY_TOKEN_HEADER` | `x-bam-token` | Header that carries the token. |
+| `BARCLAYS_AI_GATEWAY_TOKEN_HEADER_TEMPLATE` | `{token}` | Header value; `{token}` is replaced (e.g. `Bearer {token}`). |
+| `BARCLAYS_AI_AGENT_TASK_TYPE` → `CONNECTOR_AI_AGENT_TYPE` | `barclays.ai-gateway:aiagent:1` | Job type of the AI Agent **Task**. |
+| `BARCLAYS_AI_AGENT_SUBPROCESS_TYPE` → `CONNECTOR_AI_AGENT_JOB_WORKER_TYPE` | `barclays.ai-gateway:aiagent-job-worker:1` | Job type of the AI Agent **Sub-process**. |
 
 Further properties (no env mapping): `retry-on-unauthorized` (`true`: after a gateway 401, fetch a
 fresh token and resend once), `token.refresh-skew` (`PT60S`, capped at half the token lifetime),
@@ -79,7 +79,7 @@ Only a missing endpoint, or one that is not an absolute URL with a host, fails t
 
 ### The BAM token and its caching
 
-`BamTokenClient` calls `GET <ORG_AI_BAM_TOKEN_URL>` with `Authorization: Basic base64(user:password)`
+`BamTokenClient` calls `GET <BARCLAYS_AI_BAM_TOKEN_URL>` with `Authorization: Basic base64(user:password)`
 and reads `bamToken` from the JSON response. The token is valid for 10 minutes;
 `BamTokenCache` manages it:
 
@@ -104,7 +104,7 @@ and reads `bamToken` from the JSON response. The token is valid for 10 minutes;
 POST https://<gateway>/<base>/model/<model id, URL-encoded>/converse
 x-bam-token: <token>
 Accept: application/json
-Host: <ORG_AI_GATEWAY_HOST_HEADER>
+Host: <BARCLAYS_AI_GATEWAY_HOST_HEADER>
 Content-Type: application/json
 (no Authorization, X-Amz-Date, X-Amz-Security-Token or X-Amz-Content-Sha256)
 ```
@@ -117,7 +117,9 @@ redirects, so the credentials only ever reach the configured host.
 
 The only change a BPMN element needs is its **task definition type**.
 
-* **Organization templates (recommended):** `element-templates/*.json` are generated from Camunda's
+* **Barclays AI Agent templates (recommended):** *Barclays AI Agent*
+  (`element-templates/barclays-ai-agent-task.json`) and *Barclays AI Agent Sub-process*
+  (`element-templates/barclays-ai-agent-subprocess.json`) are generated from Camunda's
   official 8.9.12 templates by `scripts/generate-element-templates.py`. They set the custom job
   type, fix the provider to Bedrock with `defaultCredentialsChain` (no AWS key fields) and make the
   custom endpoint required. Regenerate after changing job types or upgrading Camunda:
@@ -131,14 +133,14 @@ Never put AWS keys, API keys, client secrets or tokens in BPMN. Do not set
 
 ## Security and logging
 
-* Every Bedrock config goes to the organization path; element AWS keys/API keys are ignored and the
+* Every Bedrock config goes to the Barclays gateway path; element AWS keys/API keys are ignored and the
   client resolves only the no-auth scheme, so no SigV4 or bearer signer runs. AWS signing headers
   are stripped.
 * Credentials are fetched before the model is called and on every attempt. If they cannot be
   obtained, the job fails and nothing is sent. A final gateway 401/403 fails the job with a sanitized
   `FAILED_MODEL_CALL` error. Exceptions carry fixed messages and no cause.
 * **The endpoint is not a control:** credentials go to whatever URL an element points at. Restrict
-  who can deploy processes with the organization templates and consider egress policies.
+  who can deploy processes with the Barclays AI Agent templates and consider egress policies.
 * Logs contain header *names*, hosts, paths, status codes and durations, never tokens, header
   values, element AWS keys or bodies (`LoggingIT` asserts this at TRACE). Key/value pairs are
   appended to plain-text lines by the `logging.pattern.console` set in `application.yml` (Spring
@@ -149,21 +151,21 @@ Never put AWS keys, API keys, client secrets or tokens in BPMN. Do not set
 ## Project layout
 
 ```
-src/main/java/com/anthrobyte/camunda/aiagent/
+src/main/java/com/barclays/groupcontrol/co/camunda/connectors/
   auth/        BAM token: fetch, cache, headers; no Camunda/AWS dependencies
     BamTokenClient, BamTokenSettings            GET the BAM token (Basic auth), expiry from iat/exp
     BamTokenCache                               token cache, expiry skew, single-flight refresh, invalidation;
                                                 hands out the headers for each gateway request
     GatewayCredentials, BamToken                values redacted in toString
-    OrganizationAuthentication(Unavailable)Exception, AuthenticationFailureReason
-  transport/   AuthenticatingSdkHttpClient(+Builder): org headers per attempt, 401 retry-once, strips SigV4 headers
+    BarclaysAuthentication(Unavailable)Exception, AuthenticationFailureReason
+  transport/   AuthenticatingSdkHttpClient(+Builder): Barclays headers per attempt, 401 retry-once, strips SigV4 headers
   camunda/     the only Camunda integration points
-    OrganizationGatewayChatModelFactory         overrides Camunda's ChatModelFactory bean (router)
-    OrganizationBedrockChatModelBuilder         Bedrock client/model for the gateway
+    BarclaysGatewayChatModelFactory         overrides Camunda's ChatModelFactory bean (router)
+    BarclaysBedrockChatModelBuilder         Bedrock client/model for the gateway
     CamundaBedrockClientParity                  everything copied from Camunda's Bedrock setup
-    OrganizationAuthenticatedChatModel          fail closed before sending, sanitized auth errors
-  config/      OrganizationAuthAutoConfiguration, OrganizationAuthProperties
-src/main/resources/application.yml              job types, disabled extra connectors, ORG_* mapping
+    BarclaysAuthenticatedChatModel          fail closed before sending, sanitized auth errors
+  config/      BarclaysAuthAutoConfiguration, BarclaysAuthProperties
+src/main/resources/application.yml              job types, disabled extra connectors, BARCLAYS_* mapping
 element-templates/, scripts/                    Modeler templates and their generator
 ```
 
@@ -171,15 +173,15 @@ element-templates/, scripts/                    Modeler templates and their gene
 
 | Suite | What it proves |
 |---|---|
-| `OrganizationBedrockChatModelBuilderTest` | real AWS SDK + LangChain4j against a fake gateway: org headers sent, **no** SigV4/`X-Amz-*`, element AWS keys ignored, token caching and refresh, 401 → invalidate + one retry, 401/403 sanitized, token failures send nothing, unusable endpoints rejected, timeouts, **request body identical to Camunda's own Bedrock factory** |
-| `OrganizationGatewayChatModelFactoryTest` | every Bedrock config uses org auth, other providers delegated untouched |
+| `BarclaysBedrockChatModelBuilderTest` | real AWS SDK + LangChain4j against a fake gateway: Barclays headers sent, **no** SigV4/`X-Amz-*`, element AWS keys ignored, token caching and refresh, 401 → invalidate + one retry, 401/403 sanitized, token failures send nothing, unusable endpoints rejected, timeouts, **request body identical to Camunda's own Bedrock factory** |
+| `BarclaysGatewayChatModelFactoryTest` | every Bedrock config uses Barclays auth, other providers delegated untouched |
 | `AuthenticatingSdkHttpClientTest` | header replacement, SigV4 header removal, Host override, 401 retry with the same body |
 | `BamTokenCacheTest` | caching, skew, identity-based invalidation, 64-thread single-flight refresh, shared failure, bounded waiting |
-| `OrganizationBedrockAiAgentIT` | real Camunda auto-configuration + `AiAgentFunction`: tool-calling round trip, refresh on 401, sanitized `FAILED_MODEL_CALL`, BAM outage and unusable endpoint fail closed, LLM errors unchanged |
+| `BarclaysBedrockAiAgentIT` | real Camunda auto-configuration + `AiAgentFunction`: tool-calling round trip, refresh on 401, sanitized `FAILED_MODEL_CALL`, BAM outage and unusable endpoint fail closed, LLM errors unchanged |
 | `StandardBehaviourRegressionIT` | disabled = Camunda's own beans; enabled = OpenAI-compatible byte-identical to the standard connector |
 | `BamTokenClientTest` | Basic auth GET, expiry from `exp - iat` (clock-skew safe) with fallbacks, 401 permanent vs 408/429/5xx/timeout/unreachable transient, malformed responses, redirects not followed, credentials and tokens never logged |
-| `OrganizationAuthAutoConfigurationTest` | BAM token fetched lazily, cached and sent in `x-bam-token`, missing secrets fail startup naming the env vars, https-only BAM URL, legacy `mode` setting ignored, exactly one `ChatModelFactory`, fail-fast validation without leaking values |
+| `BarclaysAuthAutoConfigurationTest` | BAM token fetched lazily, cached and sent in `x-bam-token`, missing secrets fail startup naming the env vars, https-only BAM URL, exactly one `ChatModelFactory`, fail-fast validation without leaking values |
 | `LoggingIT` | whole AI Agent flow at TRACE: expected log lines appear, no BAM password, token or element AWS key ever logged |
-| `RuntimeApplicationSmokeIT` | a Spring Boot app with this jar and its `application.yml`, secrets via `ORG_AI_BAM_*`: bean replaced, BAM token + header defaults, custom job types |
+| `RuntimeApplicationSmokeIT` | a Spring Boot app with this jar and its `application.yml`, secrets via `BARCLAYS_AI_BAM_*`: bean replaced, BAM token + header defaults, custom job types |
 
 Upgrading Camunda: [docs/UPGRADING.md](docs/UPGRADING.md).

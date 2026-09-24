@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph camunda["CAMUNDA CONNECTOR-AGENTIC-AI 8.9.12 · UNCHANGED"]
+        direction LR
+        AI["AI Agent<br/>job worker"] --> AD["Langchain4J<br/>AiFrameworkAdapter"]
+        AD --> CMF{{"<b>ChatModelFactory</b><br/>@ConditionalOnMissingBean"}}
+        DEF["Camunda's default bean<br/><i>never created</i>"]
+    end
+    subgraph ours["THIS JAR · @AutoConfiguration(before = AgenticAiConnectorsAutoConfiguration)"]
+        direction LR
+        ROUTER["<b>BarclaysGatewayChatModelFactory</b><br/>instanceof BedrockProviderConfiguration?"]
+        BUILDER["<b>BarclaysBedrockChatModelBuilder</b><br/>unsigned client + Barclays headers"]
+        IMPL["<b>ChatModelFactoryImpl</b><br/>Camunda's own, built identically"]
+    end
+    CMF ==>|"bean already present"| ROUTER
+    CMF -.->|"backs off"| DEF
+    ROUTER ==>|"yes · Bedrock"| BUILDER
+    ROUTER -->|"no · any other provider"| IMPL
+    BUILDER ==> NET@{ icon: "logos:aws-api-gateway", form: "square", label: "Barclays Bedrock gateway", pos: "b", h: 48 }
+    IMPL --> STDP["Anthropic · OpenAI · Azure · Vertex<br/>standard authentication"]
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class AI,AD,IMPL cam
+    class CMF navy
+    class DEF,STDP ghost
+    class ROUTER,BUILDER ours
+    class NET icon
+    style camunda fill:#FAFBFD,stroke:#C9D6EE
+    style ours fill:#FFFBF7,stroke:#F3C39A

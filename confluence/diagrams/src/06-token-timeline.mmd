@@ -1,0 +1,18 @@
+gantt
+    dateFormat HH:mm:ss
+    axisFormat %M:%S
+    tickInterval 1minute
+    todayMarker off
+    section Token A
+        Served from cache · lock-free       :active, a1, 00:00:00, 9m
+        Early expiry · 60 s skew            :crit,   a2, after a1, 1m
+    section Token B
+        Served from cache · lock-free       :active, b1, 00:09:00, 4m
+        Revoked · gateway answered 401      :done,   b2, 00:13:00, 5m
+    section Token C
+        Served from cache · lock-free       :active, c1, 00:13:00, 9m
+        Early expiry · 60 s skew            :crit,   c2, after c1, 1m
+    section BAM calls
+        Fetch A · first Bedrock call        :milestone, m1, 00:00:00, 0m
+        Fetch B · A reached its skew        :milestone, m2, 00:09:00, 0m
+        Fetch C · retry after 401           :milestone, m3, 00:13:00, 0m

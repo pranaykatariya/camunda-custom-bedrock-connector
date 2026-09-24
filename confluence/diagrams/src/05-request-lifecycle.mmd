@@ -1,0 +1,56 @@
+sequenceDiagram
+    autonumber
+    box rgba(59,111,216,0.06) Camunda · unchanged
+        participant Z as Zeebe
+        participant A as AI Agent
+    end
+    box rgba(240,122,26,0.07) barclays-ai-agent-connector
+        participant F as Router + Builder
+        participant M as AuthenticatedChatModel
+    end
+    box rgba(59,111,216,0.06) LangChain4j + AWS SDK
+        participant L as BedrockChatModel
+    end
+    box rgba(240,122,26,0.07) barclays-ai-agent-connector
+        participant H as AuthenticatingSdkHttpClient
+        participant C as BamTokenCache
+    end
+    box rgba(34,160,90,0.06) Barclays network
+        participant B as BAM
+        participant G as Bedrock gateway
+    end
+
+    rect rgba(122,90,240,0.07)
+        Note over Z,F: PHASE 1 · Build the chat model
+        Z->>A: job barclays.ai-gateway:aiagent:1
+        A->>F: createChatModel(Bedrock config)
+        F->>F: validate custom endpoint
+        F-->>A: model with unsigned client
+    end
+
+    rect rgba(240,122,26,0.07)
+        Note over A,C: PHASE 2 · Pre-flight, fail closed
+        A->>+M: chat(request)
+        M->>C: getCredentials()
+        C-->>M: ok, or throw and send nothing
+    end
+
+    rect rgba(34,160,90,0.07)
+        Note over M,G: PHASE 3 · Call through the AWS SDK
+        M->>+L: chat(request)
+        L->>+H: prepareRequest (unsigned)
+        H->>C: getCredentials()
+        alt token cached and fresh
+            C-->>H: headers · lock-free read
+        else missing or within 60 s of expiry
+            C->>B: GET token-url · Basic auth
+            B-->>C: bamToken (JWT)
+            C-->>H: headers
+        end
+        H->>G: POST /model/{id}/converse + x-bam-token
+        G-->>H: 200 Converse response
+        H-->>-L: response, status unchanged
+        L-->>-M: ChatResponse
+    end
+    M-->>-A: ChatResponse · token usage logged
+    A-->>Z: next tool call, or complete the job

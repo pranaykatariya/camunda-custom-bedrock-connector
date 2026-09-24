@@ -1,5 +1,5 @@
-CONNECTOR_AI_AGENT_TYPE: ${ORG_AI_AGENT_TASK_TYPE:org.ai-gateway:aiagent:1}
-CONNECTOR_AI_AGENT_JOB_WORKER_TYPE: ${ORG_AI_AGENT_SUBPROCESS_TYPE:org.ai-gateway:aiagent-job-worker:1}
+CONNECTOR_AI_AGENT_TYPE: ${BARCLAYS_AI_AGENT_TASK_TYPE:barclays.ai-gateway:aiagent:1}
+CONNECTOR_AI_AGENT_JOB_WORKER_TYPE: ${BARCLAYS_AI_AGENT_SUBPROCESS_TYPE:barclays.ai-gateway:aiagent-job-worker:1}
 
 camunda:
   connector:
@@ -21,23 +21,23 @@ camunda:
             tool:
               enabled: false
 
-organization:
+barclays:
   ai-gateway:
     auth:
-      enabled: ${ORG_AI_GATEWAY_AUTH_ENABLED:true}
+      enabled: ${BARCLAYS_AI_GATEWAY_AUTH_ENABLED:true}
       token:
-        header-name: ${ORG_AI_GATEWAY_TOKEN_HEADER:x-bam-token}
-        header-value-template: "${ORG_AI_GATEWAY_TOKEN_HEADER_TEMPLATE:{token}}"
+        header-name: ${BARCLAYS_AI_GATEWAY_TOKEN_HEADER:x-bam-token}
+        header-value-template: "${BARCLAYS_AI_GATEWAY_TOKEN_HEADER_TEMPLATE:{token}}"
       static-headers:
         - name: Accept
           value: application/json
-        # Placeholder: set ORG_AI_GATEWAY_HOST_HEADER to the host the gateway routes on.
+        # Placeholder: set BARCLAYS_AI_GATEWAY_HOST_HEADER to the host the gateway routes on.
         - name: Host
-          value: ${ORG_AI_GATEWAY_HOST_HEADER:bedrock-gateway.placeholder.invalid}
+          value: ${BARCLAYS_AI_GATEWAY_HOST_HEADER:bedrock-gateway.placeholder.invalid}
       bam:
-        token-url: ${ORG_AI_BAM_TOKEN_URL:}
-        username: ${ORG_AI_BAM_USERNAME:}
-        password: ${ORG_AI_BAM_PASSWORD:}
+        token-url: ${BARCLAYS_AI_BAM_TOKEN_URL:}
+        username: ${BARCLAYS_AI_BAM_USERNAME:}
+        password: ${BARCLAYS_AI_BAM_PASSWORD:}
 
 logging:
   pattern:

@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant T1 as Job thread 1
+    participant T2 as Job thread 2
+    participant T3 as Job thread 3
+    participant C as BamTokenCache
+    participant B as BAM
+    Note over T1,C: The token just went stale and three jobs need it in the same millisecond
+    par
+        T1->>C: getCredentials()
+    and
+        T2->>C: getCredentials()
+    and
+        T3->>C: getCredentials()
+    end
+    critical T1 wins refreshLock
+        C->>+B: GET token · exactly one call
+        B-->>-C: bamToken
+    option T2 and T3 park on the lock
+        C->>C: wait at most refresh-wait-timeout (15 s)
+    end
+    C-->>T1: fresh headers
+    C-->>T2: same token · double-check hit
+    C-->>T3: same token · double-check hit
+    Note over T1,B: Had the fetch failed, T2 and T3 get a copy of the same failure instead of a second BAM call

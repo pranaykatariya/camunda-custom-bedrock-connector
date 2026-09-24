@@ -1,0 +1,23 @@
+quadrantChart
+    x-axis "Fails at BAM · token" --> "Fails at the gateway"
+    y-axis "Transient · job retries" --> "Permanent · fix config"
+    quadrant-1 Gateway refuses
+    quadrant-2 BAM refuses
+    quadrant-3 BAM hiccup
+    quadrant-4 Gateway hiccup
+    TOKEN_REQUEST_REJECTED:::bad: [0.13, 0.88]
+    MALFORMED_TOKEN_RESPONSE:::bad: [0.26, 0.74]
+    TOKEN_SOURCE_FAILED:::bad: [0.38, 0.61]
+    ENDPOINT_NOT_CONFIGURED:::bad: [0.60, 0.60]
+    GATEWAY_REJECTED_CREDENTIALS:::bad: [0.68, 0.88]
+    GATEWAY_ACCESS_DENIED:::bad: [0.80, 0.74]
+    TOKEN_ENDPOINT_TIMEOUT:::trans: [0.12, 0.38]
+    TOKEN_ENDPOINT_ERROR:::trans: [0.30, 0.27]
+    TOKEN_ENDPOINT_UNREACHABLE:::trans: [0.13, 0.15]
+    INTERRUPTED:::trans: [0.36, 0.07]
+    First 401 then refresh and resend:::ours: [0.62, 0.34]
+    LLM 4xx or gateway 5xx passed through:::ghost: [0.70, 0.13]
+    classDef bad color: #D8414F, radius: 8, stroke-color: #FFFFFF, stroke-width: 2px
+    classDef trans color: #F07A1A, radius: 8, stroke-color: #FFFFFF, stroke-width: 2px
+    classDef ours color: #22A05A, radius: 9, stroke-color: #FFFFFF, stroke-width: 2px
+    classDef ghost color: #94A3B8, radius: 7, stroke-color: #FFFFFF, stroke-width: 2px

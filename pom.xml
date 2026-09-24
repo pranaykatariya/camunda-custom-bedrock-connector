@@ -4,13 +4,13 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.anthrobyte.camunda</groupId>
-  <artifactId>org-ai-agent-connector-runtime</artifactId>
+  <groupId>com.barclays.groupcontrol.co.camunda</groupId>
+  <artifactId>barclays-ai-agent-connector-runtime</artifactId>
   <version>1.0.0-SNAPSHOT</version>
-  <name>Organization AI Agent Connector Runtime</name>
+  <name>Barclays AI Agent Connector Runtime</name>
   <description>
-    Extension jar for the Camunda 8.9 connector runtime: organization-specific authentication for the
-    standard AI Agent connector's AWS Bedrock provider through the organization Bedrock gateway.
+    Extension jar for the Camunda 8.9 connector runtime: Barclays-specific authentication for the
+    standard AI Agent connector's AWS Bedrock provider through the Barclays Bedrock gateway.
   </description>
 
   <properties>

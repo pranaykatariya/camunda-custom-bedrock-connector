@@ -1,0 +1,45 @@
+flowchart LR
+    subgraph Z1["SECRET STORE"]
+        S1@{ icon: "mdi:shield-key", form: "square", label: "Kubernetes Secret<br/>BARCLAYS_AI_BAM_*", pos: "b", h: 46 }
+    end
+    subgraph Z2["RUNTIME POD · MEMORY ONLY"]
+        direction TB
+        P1["<b>BamTokenClient</b><br/>holds the Basic credentials"]
+        P2["<b>BamTokenCache</b><br/>holds the current token"]
+        P3["<b>Logs</b><br/>header names · hosts · status<br/>never values or bodies"]
+    end
+    subgraph Z3["BPMN + ZEEBE · NO SECRETS"]
+        E1["<b>AI Agent element</b><br/>region · model · custom endpoint"]
+    end
+    subgraph Z4["BARCLAYS NETWORK"]
+        direction TB
+        N1@{ icon: "logos:jwt-icon", form: "square", label: "BAM<br/>https only · no redirects", pos: "b", h: 46 }
+        N2@{ icon: "logos:aws-api-gateway", form: "square", label: "Bedrock gateway<br/>verifies x-bam-token", pos: "b", h: 46 }
+    end
+    S1 -->|"env vars at startup"| P1
+    P1 -->|"Basic auth over TLS"| N1
+    N1 -->|"bamToken"| P2
+    P2 ==>|"token on every request"| N2
+    E1 -.->|"custom endpoint URL decides<br/>where the token is sent"| N2
+    E1 -.-> RISK["<b>Not a control</b><br/>no allow-list: any URL on the element<br/>receives the token"]
+    P1 ~~~ P3
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class S1,N1,N2 icon
+    class P1,P2 ours
+    class P3 ghost
+    class E1 cfg
+    class RISK bad
+    style Z1 fill:#FAF8FF,stroke:#CBBDF7
+    style Z2 fill:#FFFBF7,stroke:#F3C39A
+    style Z3 fill:#FAF8FF,stroke:#CBBDF7
+    style Z4 fill:#F6FCF8,stroke:#A8DDBC

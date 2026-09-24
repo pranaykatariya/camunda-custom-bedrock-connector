@@ -1,0 +1,26 @@
+flowchart LR
+    BOOT(["Spring context<br/>starts"]) --> C1{"auth.enabled?"}
+    C1 -->|"false"| STD["<b>Standard Camunda connector</b><br/>nothing from this jar is active"]
+    C1 -->|"true"| C2{"agenticai.framework<br/>langchain4j or unset?"}
+    C2 -->|"no"| STD
+    C2 -->|"yes"| V["<b>validate()</b><br/>collects every problem<br/>in one pass"]
+    V -->|"problems"| X["<b>Startup fails</b><br/>property names + env vars listed<br/>values never printed"]
+    V -->|"ok"| BEANS["<b>BamTokenCache</b> bean<br/><b>ChatModelFactory</b> router"]
+    BEANS --> W["WARN if Host header is still<br/>the .invalid placeholder"]
+    W --> READY(["Ready · first Bedrock call<br/>fetches the first token"])
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class BOOT,C1,C2,V cfg
+    class STD ghost
+    class X bad
+    class BEANS,W ours
+    class READY ext

@@ -1,0 +1,50 @@
+classDiagram
+    direction LR
+    class BamTokenCache {
+        -AtomicReference~CachedCredentials~ current
+        -ReentrantLock refreshLock
+        -Duration refreshSkew
+        -Duration refreshWaitTimeout
+        +getCredentials() GatewayCredentials
+        +invalidate(GatewayCredentials rejected) void
+        +close() void
+    }
+    class BamTokenClient {
+        -BamTokenSettings settings
+        -HttpClient httpClient
+        +requestToken() BamToken
+        +close() void
+    }
+    class GatewayCredentials {
+        <<immutable · compared by identity>>
+        +headers() Map~String,String~
+        +containsHeader(String) boolean
+    }
+    class BamToken {
+        <<record>>
+        +String value
+        +Instant expiresAt
+    }
+    class BamTokenSettings {
+        <<record>>
+        +URI tokenUrl
+        +String username
+        +String password
+        +Duration requestTimeout
+        +Duration defaultTokenLifetime
+    }
+    class AuthenticatingSdkHttpClient {
+        +prepareRequest(HttpExecuteRequest) ExecutableHttpRequest
+        ~authorize(request, credentials)$ HttpExecuteRequest
+    }
+    AuthenticatingSdkHttpClient --> BamTokenCache : getCredentials() / invalidate()
+    BamTokenCache --> BamTokenClient : requestToken()
+    BamTokenCache ..> GatewayCredentials : hands out
+    BamTokenClient ..> BamToken : returns
+    BamTokenClient --> BamTokenSettings
+    style BamTokenCache fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px
+    style BamTokenClient fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px
+    style AuthenticatingSdkHttpClient fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px
+    style GatewayCredentials fill:#EEF3FB,stroke:#3B6FD8
+    style BamToken fill:#EEF3FB,stroke:#3B6FD8
+    style BamTokenSettings fill:#EEF3FB,stroke:#3B6FD8

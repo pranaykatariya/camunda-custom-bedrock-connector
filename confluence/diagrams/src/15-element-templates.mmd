@@ -1,0 +1,31 @@
+flowchart LR
+    A@{ icon: "mdi:state-machine", form: "square", label: "Camunda official templates<br/>exact connectors version", pos: "b", h: 48 }
+    B@{ icon: "logos:python", form: "square", label: "generate-element-templates.py", pos: "b", h: 48 }
+    C@{ icon: "mdi:file-document-multiple-outline", form: "square", label: "element-templates/*.json", pos: "b", h: 48 }
+    D@{ icon: "mdi:vector-square-edit", form: "square", label: "Camunda Modeler", pos: "b", h: 48 }
+    E["<b>BPMN element</b><br/>region · gateway URL · model"]
+    A -->|"download"| B --> C -->|"publish"| D --> E
+    subgraph CH["WHAT THE SCRIPT CHANGES · everything else stays as Camunda ships it"]
+        direction TB
+        T1["new template id + name"]
+        T2["task type → Barclays job type"]
+        T3["provider fixed to AWS Bedrock"]
+        T4["auth fixed to defaultCredentialsChain<br/>key fields removed"]
+        T5["custom endpoint required<br/>optional default via --gateway-url"]
+    end
+    B -.-> CH
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class A,B,C,D icon
+    class E cfg
+    class T1,T2,T3,T4,T5 ours
+    style CH fill:#FFFBF7,stroke:#F3C39A

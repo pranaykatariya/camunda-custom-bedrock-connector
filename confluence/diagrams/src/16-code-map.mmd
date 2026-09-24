@@ -1,0 +1,55 @@
+flowchart LR
+    subgraph CFG["config/"]
+        direction TB
+        AC["<b>BarclaysAuthAutoConfiguration</b><br/>wires the beans"]
+        AP["<b>BarclaysAuthProperties</b><br/>binds + validates"]
+    end
+    subgraph CAM["camunda/ · the only Camunda touchpoints"]
+        direction TB
+        RF["<b>BarclaysGatewayChatModelFactory</b><br/>router"]
+        BB["<b>BarclaysBedrockChatModelBuilder</b><br/>client + model"]
+        PAR["<b>CamundaBedrockClientParity</b><br/>copied Camunda setup"]
+        ACM["<b>BarclaysAuthenticatedChatModel</b><br/>fail closed + sanitize"]
+    end
+    subgraph TR["transport/"]
+        direction TB
+        HB["<b>AuthenticatingSdkHttpClientBuilder</b>"]
+        HC["<b>AuthenticatingSdkHttpClient</b><br/>headers · strip SigV4 · 401 retry"]
+    end
+    subgraph AU["auth/ · no Camunda or AWS dependencies"]
+        direction TB
+        TC["<b>BamTokenCache</b><br/>cache · skew · single-flight"]
+        CL["<b>BamTokenClient</b><br/>GET + Basic auth"]
+        GC["GatewayCredentials · BamToken<br/>BamTokenSettings"]
+        EX["Exceptions +<br/>AuthenticationFailureReason"]
+    end
+    AC --> AP
+    AC --> RF
+    AC --> TC
+    RF --> BB
+    BB --> PAR
+    BB --> ACM
+    BB --> HB --> HC
+    HC --> TC
+    ACM --> TC
+    TC --> CL
+    TC --> GC
+    CL --> EX
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class AC,AP cfg
+    class RF,BB,PAR,ACM,HB,HC,TC,CL ours
+    class GC,EX ghost
+    style CFG fill:#FAF8FF,stroke:#CBBDF7
+    style CAM fill:#FFFBF7,stroke:#F3C39A
+    style TR fill:#FFFBF7,stroke:#F3C39A
+    style AU fill:#FFFBF7,stroke:#F3C39A

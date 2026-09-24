@@ -1,0 +1,27 @@
+stateDiagram-v2
+    direction LR
+    [*] --> Empty: pod starts
+    Empty --> Refreshing: first Bedrock call
+    state "Holding a token&nbsp;&nbsp;&nbsp;" as Holding {
+        direction LR
+        [*] --> Fresh
+        Fresh --> Fresh: getCredentials() · lock-free
+        Fresh --> Stale: now ≥ exp − skew
+    }
+    Refreshing --> Holding: BAM 200 · expiry from exp − iat
+    Refreshing --> Failed: BAM error, timeout
+    Failed --> Refreshing: next caller tries again
+    Stale --> Refreshing: one thread takes refreshLock
+    Holding --> Empty: gateway 401 · invalidate(same instance)
+    Holding --> [*]: context shutdown
+
+    classDef ours fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,color:#6A7385
+    classDef warn fill:#FFF8E1,stroke:#D69E2E,stroke-width:1.5px,color:#744210
+    class Fresh ext
+    class Stale warn
+    class Refreshing ours
+    class Failed bad
+    class Empty ghost

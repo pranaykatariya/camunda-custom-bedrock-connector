@@ -1,0 +1,31 @@
+flowchart TB
+    subgraph STD["STANDARD CAMUNDA CONNECTOR"]
+        direction LR
+        s1["<b>AI Agent</b><br/>Camunda"] --> s2["<b>BedrockRuntimeClient</b><br/>AWS SigV4 signer"]
+        s2 -->|"SigV4 · Authorization + X-Amz-*"| s3@{ icon: "logos:aws", form: "square", label: "AWS Bedrock", pos: "b", h: 52 }
+    end
+    subgraph BARCLAYS["WITH BARCLAYS-AI-AGENT-CONNECTOR"]
+        direction LR
+        o1["<b>AI Agent</b><br/>Camunda · unchanged"] --> o2["<b>BedrockRuntimeClient</b><br/>NoAuth · never signs"]
+        o2 --> o3["<b>AuthenticatingSdkHttpClient</b><br/>adds Barclays headers<br/>strips SigV4 headers"]
+        o3 ==>|"x-bam-token · Accept · Host"| o4@{ icon: "logos:aws-api-gateway", form: "square", label: "Barclays Bedrock gateway", pos: "b", h: 52 }
+        o4 --> o5@{ icon: "logos:aws", form: "square", label: "AWS Bedrock", pos: "b", h: 52 }
+        o3 <-.->|"cached ~9 min"| o6@{ icon: "logos:jwt-icon", form: "circle", label: "BAM token", pos: "b", h: 44 }
+    end
+    STD ~~~ BARCLAYS
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class s1,s2,o1 cam
+    class o2,o3 ours
+    class s3,o4,o5,o6 icon
+    style STD fill:#FAFBFD,stroke:#D5DDE8
+    style BARCLAYS fill:#FFFBF7,stroke:#F3C39A

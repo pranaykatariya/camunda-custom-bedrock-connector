@@ -1,0 +1,30 @@
+block-beta
+    columns 4
+    zeebe["<b>Zeebe</b>  ·  activates jobs of type barclays.ai-gateway:aiagent:1"]:4
+    agent["<b>Camunda AI Agent connector</b>  ·  orchestration · tools · MCP · memory · prompts"]:4
+    router["<b>BarclaysGatewayChatModelFactory</b>  ·  the one Camunda bean this jar replaces"]:4
+    h1["BEDROCK PATH"]:3 h2["EVERY OTHER PROVIDER"]:1
+    b1["<b>BarclaysBedrockChatModelBuilder</b>  ·  endpoint check, unsigned client"]:3 c1["Camunda ChatModelFactoryImpl"]:1
+    b2["<b>BarclaysAuthenticatedChatModel</b>  ·  pre-flight, fail closed, sanitize"]:3 c2["Anthropic · OpenAI · Azure · Vertex"]:1
+    b3["LangChain4j  BedrockChatModel"]:3 c3["standard auth, untouched"]:1
+    b4["AWS SDK  BedrockRuntimeClient  ·  NoAuth scheme, never signs"]:3 space:1
+    b5["<b>AuthenticatingSdkHttpClient</b>  ⇄  <b>BamTokenCache</b>  ·  Barclays headers, 401 retry"]:3 space:1
+    b6["Apache HTTP client  ·  Camunda proxy settings + timeouts"]:3 space:1
+    gw["<b>Barclays Bedrock gateway</b>  →  AWS Bedrock"]:3 prov["Provider APIs"]:1
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    classDef head fill:transparent,stroke:transparent,color:#64748B
+    class zeebe,agent,b3,b4,b6,c1,c2 cam
+    class router navy
+    class b1,b2,b5 ours
+    class c3,prov ghost
+    class gw ext
+    class h1,h2 head

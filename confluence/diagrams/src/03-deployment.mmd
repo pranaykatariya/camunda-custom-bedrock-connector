@@ -1,0 +1,44 @@
+flowchart LR
+    MOD@{ icon: "mdi:vector-polyline", form: "square", label: "Camunda Modeler<br/>Barclays element templates", pos: "b", h: 50 }
+    subgraph C8["CAMUNDA 8 CLUSTER"]
+        ZB@{ icon: "mdi:state-machine", form: "square", label: "Zeebe", pos: "b", h: 50 }
+    end
+    subgraph POD["CONNECTOR RUNTIME POD · KUBERNETES"]
+        direction TB
+        RT@{ icon: "logos:spring-icon", form: "square", label: "Camunda connector runtime<br/>Spring Boot 4 · Java 21", pos: "b", h: 50 }
+        JAR@{ icon: "logos:java", form: "square", label: "barclays-ai-agent-connector jar<br/>on the classpath", pos: "b", h: 50 }
+        SEC@{ icon: "mdi:shield-key", form: "square", label: "Kubernetes Secret<br/>BARCLAYS_AI_BAM_*", pos: "b", h: 50 }
+    end
+    subgraph ORGN["BARCLAYS NETWORK"]
+        direction TB
+        GW@{ icon: "logos:aws-api-gateway", form: "square", label: "Bedrock gateway<br/>element's custom endpoint", pos: "b", h: 50 }
+        BAM@{ icon: "logos:jwt-icon", form: "square", label: "BAM token endpoint<br/>https · Basic auth", pos: "b", h: 50 }
+    end
+    subgraph AWS["AWS"]
+        BR@{ icon: "logos:aws", form: "square", label: "Bedrock models<br/>Converse API", pos: "b", h: 50 }
+    end
+    LLM@{ icon: "logos:openai-icon", form: "square", label: "Other LLM providers<br/>standard auth", pos: "b", h: 50 }
+
+    MOD -->|"deploy BPMN"| ZB
+    ZB -->|"activate jobs"| RT
+    RT -->|"loads"| JAR
+    SEC -.->|"env vars"| JAR
+    JAR ==>|"POST converse · x-bam-token"| GW
+    JAR -->|"GET token"| BAM
+    GW ==> BR
+    RT -.->|"non-Bedrock agents"| LLM
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class MOD,ZB,RT,JAR,SEC,GW,BAM,BR,LLM icon
+    style C8 fill:#F7F9FD,stroke:#C9D6EE
+    style POD fill:#FFFBF7,stroke:#F3C39A
+    style ORGN fill:#F6FCF8,stroke:#A8DDBC
+    style AWS fill:#F6FCF8,stroke:#A8DDBC

@@ -1,0 +1,21 @@
+block-beta
+    columns 6
+    space:2 it["<b>Integration · 4 suites</b><br/>BarclaysBedrockAiAgentIT<br/>StandardBehaviourRegressionIT<br/>LoggingIT · RuntimeApplicationSmokeIT"]:2 space:2
+    space:1 comp["<b>Component · 3 suites</b><br/>BarclaysBedrockChatModelBuilderTest<br/>BarclaysGatewayChatModelFactoryTest · BarclaysAuthAutoConfigurationTest"]:4 space:1
+    unit["<b>Unit · 4 suites</b><br/>BamTokenCacheTest · BamTokenClientTest · GatewayCredentialsTest · AuthenticatingSdkHttpClientTest"]:6
+    infra["<b>Test support</b>  ·  FakeHttpServer  ·  MutableClock  ·  BamResponses  ·  BedrockResponses  ·  OpenAiResponses  ·  CamundaFixtures  ·  AgenticAiTestInfrastructure"]:6
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class it navy
+    class comp ours
+    class unit cam
+    class infra ghost

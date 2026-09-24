@@ -1,0 +1,30 @@
+flowchart TD
+    S(["AWS SDK attempt"]) --> G1["getCredentials()<br/><b>token A</b>"]
+    G1 --> SEND1["Send with token A"]
+    SEND1 --> Q1{"HTTP 401?"}
+    Q1 -->|"no"| OK(["Response goes back to the SDK<br/>exactly as received"])
+    Q1 -->|"yes"| INV1["invalidate(token A)<br/>only if A is still current"]
+    INV1 --> Q2{"retry-on-unauthorized<br/>and not aborted?"}
+    Q2 -->|"no"| R401["Return the 401"]
+    Q2 -->|"yes"| G2["getCredentials()<br/><b>fresh token B</b>"]
+    G2 --> SEND2["Resend once<br/>same body, re-read from the SDK"]
+    SEND2 --> Q3{"401 again?"}
+    Q3 -->|"no"| OK
+    Q3 -->|"yes"| INV2["invalidate(token B)"] --> R401
+    R401 --> SAN["AuthenticatedChatModel sanitizes<br/><b>GATEWAY_REJECTED_CREDENTIALS</b>"]
+    SAN --> FAIL(["Job fails · FAILED_MODEL_CALL<br/>Camunda retries, then incident"])
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class S,Q1,Q2,Q3 cam
+    class G1,SEND1,INV1,G2,SEND2,INV2 ours
+    class OK ext
+    class R401,SAN,FAIL bad

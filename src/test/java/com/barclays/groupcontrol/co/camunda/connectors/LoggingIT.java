@@ -1,0 +1,175 @@
+package com.barclays.groupcontrol.co.camunda.connectors;
+
+import static com.barclays.groupcontrol.co.camunda.connectors.support.AgenticAiTestInfrastructure.contextRunner;
+import static com.barclays.groupcontrol.co.camunda.connectors.support.AgenticAiTestInfrastructure.outboundContext;
+import static com.barclays.groupcontrol.co.camunda.connectors.support.BamResponses.TOKEN_PATH;
+import static com.barclays.groupcontrol.co.camunda.connectors.support.CamundaFixtures.BEDROCK_MODEL;
+import static com.barclays.groupcontrol.co.camunda.connectors.support.CamundaFixtures.BEDROCK_REGION;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import com.barclays.groupcontrol.co.camunda.connectors.support.BamResponses;
+import com.barclays.groupcontrol.co.camunda.connectors.support.BedrockResponses;
+import com.barclays.groupcontrol.co.camunda.connectors.support.FakeHttpServer;
+import com.barclays.groupcontrol.co.camunda.connectors.support.FakeHttpServer.Response;
+import io.camunda.connector.agenticai.aiagent.AiAgentFunction;
+import java.util.HashMap;
+import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+
+/**
+ * Runs the AI Agent with this project's loggers at TRACE and checks that the operational log
+ * statements appear and that no credential ever does, at any level.
+ */
+@ExtendWith(OutputCaptureExtension.class)
+class LoggingIT {
+
+  private static final String CONVERSE = "/bedrock" + BedrockResponses.conversePath(BEDROCK_MODEL);
+
+  private final FakeHttpServer bam = new FakeHttpServer().on(TOKEN_PATH, BamResponses.issuing());
+  private final FakeHttpServer gateway = new FakeHttpServer();
+  private final Logger projectLogger =
+      (Logger) LoggerFactory.getLogger("com.barclays.groupcontrol.co.camunda.connectors");
+  private Level previousLevel;
+
+  @BeforeEach
+  void traceLogging() {
+    previousLevel = projectLogger.getLevel();
+    projectLogger.setLevel(Level.TRACE);
+  }
+
+  @AfterEach
+  void tearDown() {
+    projectLogger.setLevel(previousLevel);
+    bam.close();
+    gateway.close();
+  }
+
+  private Map<String, Object> inputs(String endpoint) {
+    final Map<String, Object> bedrock = new HashMap<>();
+    bedrock.put("region", BEDROCK_REGION);
+    bedrock.put("endpoint", endpoint);
+    // Leftover AWS keys on the element: must be ignored, never sent or logged
+    bedrock.put(
+        "authentication",
+        Map.of("type", "credentials", "accessKey", "AKIA-Bpmn-Access-Key", "secretKey", "Bpmn-Secret-Key-Value"));
+    bedrock.put("model", Map.of("model", BEDROCK_MODEL));
+    final Map<String, Object> data = new HashMap<>();
+    data.put("systemPrompt", Map.of("prompt", "You are helpful."));
+    data.put("userPrompt", Map.of("prompt", "Hi"));
+    data.put("memory", Map.of("storage", Map.of("type", "in-process"), "contextWindowSize", 10));
+    data.put("limits", Map.of("maxModelCalls", 5));
+    data.put("response", Map.of("format", Map.of("type", "text")));
+    return Map.of("provider", Map.of("type", "bedrock", "bedrock", bedrock), "data", data);
+  }
+
+  private void runAgent(String endpoint) {
+    contextRunner()
+        .withPropertyValues(BamResponses.properties(bam))
+        .withPropertyValues("barclays.ai-gateway.auth.enabled=true")
+        .run(
+            ctx -> {
+              try {
+                ctx.getBean(AiAgentFunction.class).execute(outboundContext(inputs(endpoint)));
+              } catch (RuntimeException expectedInFailureScenarios) {
+                // asserted by the caller through the captured log
+              }
+            });
+  }
+
+  private void runAgent() {
+    runAgent(gateway.baseUrl() + "/bedrock");
+  }
+
+  /** No issued token, BAM credential or element AWS key appears in the log, at any level. */
+  private static void assertNoSecrets(CapturedOutput output) {
+    assertThat(output.getAll())
+        // JWT_PREFIX starts every issued token, so this also catches a partially logged one.
+        .doesNotContain(BamResponses.JWT_PREFIX)
+        .doesNotContain(BamResponses.PASSWORD)
+        .doesNotContain(BamResponses.basicAuthorization().substring("Basic ".length()))
+        .doesNotContain("AKIA-Bpmn-Access-Key")
+        .doesNotContain("Bpmn-Secret-Key-Value");
+  }
+
+  @Test
+  void happyPathWithTokenRefreshAfter401(CapturedOutput output) {
+    gateway.on(
+        CONVERSE,
+        (req, n) -> n == 1 ? Response.json(401, "{}") : Response.json(200, BedrockResponses.text("ok")));
+
+    runAgent();
+
+    assertThat(output.getAll())
+        // startup
+        .contains("Barclays Bedrock gateway authentication enabled")
+        .contains("Token-based Barclays authentication configured")
+        .contains("Registering Barclays Bedrock ChatModelFactory")
+        .contains("Camunda ChatModelFactory replaced by Barclays Bedrock gateway router")
+        // per request
+        .contains("Creating Bedrock chat model for Barclays gateway")
+        .contains("AWS credentials are configured on the AI Agent element")
+        .contains("Authenticating HTTP client for Barclays Bedrock gateway built")
+        .contains("Barclays authentication token refresh required")
+        .contains("Requesting BAM token")
+        .contains("BAM token received")
+        .contains("Barclays authentication token refreshed")
+        .contains("Calling Barclays Bedrock gateway")
+        .contains("Barclays Bedrock gateway returned an error status")
+        .contains("refreshing Barclays credentials and retrying once")
+        .contains("Barclays authentication token invalidated after gateway rejection")
+        .contains("Barclays Bedrock gateway call succeeded")
+        .contains("Retry with refreshed Barclays credentials completed")
+        .contains("Bedrock chat call completed")
+        // key/value pairs are rendered in plain-text logs, not only in the json-logs profile
+        .contains("httpStatus=\"200\"")
+        .contains("totalTokens=");
+    assertNoSecrets(output);
+  }
+
+  @Test
+  void bamRejection(CapturedOutput output) {
+    bam.on(TOKEN_PATH, Response.json(401, "{\"error\":\"Invalid credentials\"}"));
+
+    runAgent();
+
+    assertThat(output.getAll())
+        .contains("BAM token request failed")
+        .contains("Barclays authentication token refresh failed")
+        .contains("TOKEN_REQUEST_REJECTED");
+    assertThat(gateway.requests()).isEmpty();
+    assertNoSecrets(output);
+  }
+
+  @Test
+  void gatewayServerErrorAndPersistent401(CapturedOutput output) {
+    gateway.on(CONVERSE, (req, n) -> Response.json(n == 1 ? 503 : 401, "{\"message\":\"x\"}"));
+
+    runAgent();
+
+    assertThat(output.getAll())
+        .contains("Barclays Bedrock gateway returned an error status")
+        .contains("Bedrock gateway authentication failed")
+        .contains("Bedrock chat call failed");
+    assertNoSecrets(output);
+  }
+
+  @Test
+  void unusableEndpointIsLogged(CapturedOutput output) {
+    // Any absolute URL is accepted; only one the SDK cannot use as an endpoint is rejected.
+    runAgent("bedrock-gateway.example.com");
+
+    assertThat(output.getAll())
+        .contains("Rejecting Bedrock endpoint: no usable Barclays gateway URL on the element")
+        .contains("custom endpoint is not an absolute url with a host");
+    assertThat(gateway.requests()).isEmpty();
+    assertNoSecrets(output);
+  }
+}

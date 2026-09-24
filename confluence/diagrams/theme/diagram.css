@@ -1,0 +1,36 @@
+/* Polish layer applied by mermaid-cli (-C). Shapes only; colours come from mermaid.json + classDefs. */
+.node rect.label-container, .node rect.basic { rx: 12px; ry: 12px; }
+.node .label-container, .node polygon, .node circle, .node ellipse, .node path.basic {
+  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, .06)) drop-shadow(0 6px 10px rgba(15, 23, 42, .07));
+}
+.cluster rect { rx: 18px; ry: 18px; }
+.cluster-label, .cluster-label span, .cluster-label p { color: #475569 !important; }
+.nodeLabel, .nodeLabel p { line-height: 1.35; }
+.nodeLabel b, .nodeLabel strong { font-weight: 700; }
+.edgeLabel, .edgeLabel p, .edgeLabel span { font-size: 13px; color: #475569 !important; background-color: #FFFFFF !important; }
+.edgeLabel .label, .edgeLabel p { padding: 1px 6px; border-radius: 6px; }
+.flowchart-link { stroke-linecap: round; }
+
+/* sequence */
+rect.actor { rx: 10px; ry: 10px; filter: drop-shadow(0 4px 8px rgba(15, 23, 42, .18)); }
+.messageText { font-size: 14px !important; }
+.note { rx: 8px; ry: 8px; }
+.labelBox { rx: 4px; ry: 4px; }
+.loopLine { stroke-dasharray: 4 3 !important; stroke-width: 1.5px !important; }
+.activation0, .activation1, .activation2 { rx: 3px; ry: 3px; }
+
+/* state */
+.statediagram-state rect.basic, .statediagram-state rect { rx: 12px; ry: 12px; }
+.statediagram-cluster rect { rx: 16px; ry: 16px; }
+
+/* gantt */
+.task { rx: 8px; ry: 8px; }
+.sectionTitle { font-weight: 600 !important; fill: #334155 !important; }
+.grid .tick line { stroke-dasharray: 2 4; }
+.grid .tick text { fill: #64748B !important; font-size: 12px !important; }
+
+/* block */
+.block .label-container, g.block rect { rx: 10px; ry: 10px; }
+
+/* class diagram */
+g.classGroup rect, .node.default rect { rx: 10px; ry: 10px; }

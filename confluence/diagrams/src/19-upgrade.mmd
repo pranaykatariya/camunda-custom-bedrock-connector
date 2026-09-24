@@ -1,0 +1,23 @@
+flowchart TD
+    BUMP["<b>1 · Bump version.connectors</b><br/>align version.spring-boot"] --> JAVAP["<b>2 · javap the new classes</b><br/>ChatModelFactoryImpl<br/>ChatModelHttpProxySupport"]
+    JAVAP --> DIFF{"Copied Bedrock setup<br/>changed upstream?"}
+    DIFF -->|"yes"| PORT["Port the change into<br/><b>CamundaBedrockClientParity</b>"] --> VERIFY
+    DIFF -->|"no"| VERIFY{"<b>3 · ./mvnw verify</b><br/>green?"}
+    VERIFY -->|"no"| FIX["Read the failing tripwire test<br/>and adapt"] --> VERIFY
+    VERIFY -->|"yes"| REGEN["<b>4 · Regenerate element templates</b><br/>review the diff"]
+    REGEN --> SHIP(["Republish templates<br/>roll out the runtime"])
+
+    %% palette (shared by every diagram; see render.py LEGEND)
+    classDef cam   fill:#EEF3FB,stroke:#3B6FD8,stroke-width:1.5px,color:#16325E
+    classDef ours  fill:#FFF1E6,stroke:#F07A1A,stroke-width:2px,color:#6B2F00
+    classDef ext   fill:#EAF7EF,stroke:#22A05A,stroke-width:1.5px,color:#0D4A2A
+    classDef bad   fill:#FDECEE,stroke:#D8414F,stroke-width:1.5px,color:#7A1420
+    classDef cfg   fill:#F1ECFF,stroke:#7A5AF0,stroke-width:1.5px,color:#33207A
+    classDef ghost fill:#F6F7F9,stroke:#B6BFCC,stroke-width:1px,stroke-dasharray:4 3,color:#6A7385
+    classDef navy  fill:#16253D,stroke:#16253D,stroke-width:1.5px,color:#FFFFFF
+    classDef icon  fill:#FFFFFF,stroke:#D5DDE8,stroke-width:1px,color:#16253D
+
+    class BUMP cfg
+    class JAVAP,DIFF,PORT,VERIFY,REGEN ours
+    class FIX bad
+    class SHIP ext

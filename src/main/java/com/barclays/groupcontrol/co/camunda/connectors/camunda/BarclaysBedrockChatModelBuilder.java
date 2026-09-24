@@ -114,7 +114,7 @@ public class BarclaysBedrockChatModelBuilder {
         .region(Region.of(connection.region()))
         .endpointOverride(endpoint)
         .credentialsProvider(AnonymousCredentialsProvider.create())
-        .putAuthScheme(NoAuthAuthScheme.create())
+        // .putAuthScheme(NoAuthAuthScheme.create())
         .authSchemeProvider(NO_AUTH_ONLY)
         .overrideConfiguration(ClientOverrideConfiguration.builder().apiCallTimeout(timeout).build())
         .httpClientBuilder(
